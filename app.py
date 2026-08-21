@@ -1103,10 +1103,67 @@ def serialize_player(p):
 def index():
     return render_template("index.html")
 
+def build_demo_picks(players_raw):
+    """
+    Synthesize a realistic-looking 15-man squad from live player data,
+    so the dashboard can be previewed before any real picks exist yet.
+    The FPL picks endpoint returns nothing for a gameweek until it
+    actually kicks off — this lets you check layout/styling before then
+    without waiting on that. Not a real squad, just plausible filler.
+    """
+    by_pos = {1: [], 2: [], 3: [], 4: []}
+    for p in players_raw.values():
+        if p.get("status") == "a":
+            by_pos[p["element_type"]].append(p)
+    for pos in by_pos:
+        by_pos[pos].sort(key=lambda p: -p.get("total_points", 0))
+
+    need = {1: 2, 2: 5, 3: 5, 4: 3}
+    team_counts = {}
+    squad = []
+    for pos, count in need.items():
+        picked = 0
+        for p in by_pos[pos]:
+            if picked >= count:
+                break
+            if team_counts.get(p["team"], 0) >= 3:  # keep it looking like a real squad
+                continue
+            squad.append(p)
+            team_counts[p["team"]] = team_counts.get(p["team"], 0) + 1
+            picked += 1
+
+    # 4-4-2 starting XI, rest to bench
+    starters, bench = [], []
+    xi_need = {1: 1, 2: 4, 3: 4, 4: 2}
+    xi_have = {1: 0, 2: 0, 3: 0, 4: 0}
+    for p in squad:
+        pos = p["element_type"]
+        (starters if xi_have[pos] < xi_need[pos] else bench).append(p)
+        if xi_have[pos] < xi_need[pos]:
+            xi_have[pos] += 1
+
+    captain = max(starters, key=lambda p: p.get("total_points", 0))
+    picks = [
+        {"element": p["id"], "position": i, "multiplier": 2 if p is captain else 1,
+         "is_captain": p is captain, "is_vice_captain": False}
+        for i, p in enumerate(starters + bench, start=1)
+    ]
+
+    total_cost = sum(p["now_cost"] for p in squad) / 10
+    bank_m     = max(round(100 - total_cost, 1), 0)
+
+    return {
+        "picks": picks,
+        "entry_history": {"bank": int(round(bank_m * 10)), "value": int(round(total_cost * 10))},
+        "active_chip": None,
+    }
+
+
 @app.route("/api/load", methods=["POST"])
 def api_load():
     data           = request.json
-    team_id        = int(data.get("team_id", 0))
+    demo_mode      = bool(data.get("demo"))
+    team_id        = int(data.get("team_id", 0) or 0)
     free_transfers = int(data.get("free_transfers", 1))
     target_gw      = data.get("gameweek")
 
@@ -1132,16 +1189,19 @@ def api_load():
             finished = sorted([e["id"] for e in events if e.get("finished")], reverse=True)
             current_gw = (finished[0] + 1) if finished else 1
 
-    try:
-        entry = _session.get(f"{BASE}/entry/{team_id}/", timeout=15)
-        if entry.status_code == 404:
-            return jsonify({"error": f"Team ID {team_id} not found."}), 404
-        entry.raise_for_status()
-        ej        = entry.json()
-        manager   = f'{ej.get("player_first_name","")} {ej.get("player_last_name","")}'.strip()
-        team_name = ej.get("name","")
-    except Exception as e:
-        return jsonify({"error": f"Could not verify team: {e}"}), 500
+    if demo_mode:
+        manager, team_name = "Preview Manager", "Sample Squad Preview"
+    else:
+        try:
+            entry = _session.get(f"{BASE}/entry/{team_id}/", timeout=15)
+            if entry.status_code == 404:
+                return jsonify({"error": f"Team ID {team_id} not found."}), 404
+            entry.raise_for_status()
+            ej        = entry.json()
+            manager   = f'{ej.get("player_first_name","")} {ej.get("player_last_name","")}'.strip()
+            team_name = ej.get("name","")
+        except Exception as e:
+            return jsonify({"error": f"Could not verify team: {e}"}), 500
 
     fix_map    = build_fix_map(fixtures, teams, current_gw)
     dgw_map    = get_dgw_map(fix_map, current_gw)
@@ -1152,31 +1212,36 @@ def api_load():
     # before deciding which picks GW to load from
     chips_used, user_gw_history = set(), []
     freehit_gws = set()
-    try:
-        hist            = fpl_get(f"/entry/{team_id}/history/")
-        chips_used      = {c.get("name","") for c in hist.get("chips",[])}
-        user_gw_history = hist.get("current", [])
-        # Build set of GWs where Free Hit was played — picks from these GWs
-        # reflect a temporary squad and should never be used as the real team
-        freehit_gws = {
-            c.get("event") for c in hist.get("chips", [])
-            if c.get("name") == "freehit"
-        }
-    except Exception:
-        pass
+    hist = {}
+    if not demo_mode:
+        try:
+            hist            = fpl_get(f"/entry/{team_id}/history/")
+            chips_used      = {c.get("name","") for c in hist.get("chips",[])}
+            user_gw_history = hist.get("current", [])
+            # Build set of GWs where Free Hit was played — picks from these GWs
+            # reflect a temporary squad and should never be used as the real team
+            freehit_gws = {
+                c.get("event") for c in hist.get("chips", [])
+                if c.get("name") == "freehit"
+            }
+        except Exception:
+            pass
 
     # Find the most recent GW that has picks AND was not a Free Hit
-    picks_data = None
-    for gw_try in [current_gw, current_gw - 1, current_gw - 2, current_gw - 3]:
-        if gw_try < 1:
-            continue
-        if gw_try in freehit_gws:
-            continue   # skip — squad from this GW is temporary
-        try:
-            picks_data = fpl_get(f"/entry/{team_id}/event/{gw_try}/picks/")
-            break
-        except Exception:
-            continue
+    if demo_mode:
+        picks_data = build_demo_picks(players_raw)
+    else:
+        picks_data = None
+        for gw_try in [current_gw, current_gw - 1, current_gw - 2, current_gw - 3]:
+            if gw_try < 1:
+                continue
+            if gw_try in freehit_gws:
+                continue   # skip — squad from this GW is temporary
+            try:
+                picks_data = fpl_get(f"/entry/{team_id}/event/{gw_try}/picks/")
+                break
+            except Exception:
+                continue
     if not picks_data:
         return jsonify({"error": f"Could not load picks for GW{current_gw}"}), 500
 

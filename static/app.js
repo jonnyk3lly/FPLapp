@@ -270,9 +270,9 @@ function lineDs(color, fill, label, data, dashed, t=0.35) {
 
 // ── Load ───────────────────────────────────────────────────────
 
-async function loadDashboard() {
+async function loadDashboard(demo) {
   const teamId = el("teamId").value.trim();
-  if (!teamId) { alert("Please enter a Team ID"); return; }
+  if (!demo && !teamId) { alert("Please enter a Team ID"); return; }
   const ft = parseInt(el("freeTransfers").value);
   const gw = el("gwSelect").value || null;
 
@@ -282,10 +282,10 @@ async function loadDashboard() {
   _phCache = {};
 
   try {
-    el("loadMsg").textContent = "Fetching FPL data...";
+    el("loadMsg").textContent = demo ? "Building sample squad..." : "Fetching FPL data...";
     const res = await fetch("/api/load", {
       method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({team_id:teamId, free_transfers:ft, gameweek:gw}),
+      body: JSON.stringify({team_id:teamId, free_transfers:ft, gameweek:gw, demo:!!demo}),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Unknown error");
