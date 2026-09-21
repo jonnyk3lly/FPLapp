@@ -228,6 +228,184 @@ def build_team_stats(players_raw):
     return result
 
 # ---------------------------------------------------------------------------
+# CM-style attribute ratings — derived from real FPL data
+# ---------------------------------------------------------------------------
+#
+# FPL's API carries no biomechanical data (no real pace, jumping, heading
+# stats) — so every attribute below is a 1-20 rating built from a real
+# statistical proxy, ranked by PERCENTILE against every other player in the
+# same position this season. Several attributes share an underlying proxy
+# metric (there just aren't 27 independent signals in the data); a small
+# deterministic per-attribute offset keeps them from reading as duplicates
+# on screen while staying grounded in the same real numbers every time the
+# same player is viewed.
+
+def _cm_jitter(player_id, label):
+    h = 0
+    for ch in f"{player_id}:{label}":
+        h = (h * 31 + ord(ch)) & 0xffffffff
+    return (h % 5) - 2   # deterministic -2..+2
+
+_CM_OUTFIELD_SCHEMA = {
+    "technical": [
+        ("Crossing",    "creativity90"),
+        ("Dribbling",   "xgi90"),
+        ("Finishing",   "xg90"),
+        ("Heading",     "cbi90"),
+        ("Long Shots",  "threat90"),
+        ("Marking",     "cbi90"),
+        ("Passing",     "creativity90"),
+        ("Tackling",    "tackles90"),
+        ("Technique",   "ict90"),
+    ],
+    "mental": [
+        ("Aggression",    "cards90"),
+        ("Anticipation",  "recoveries90"),
+        ("Bravery",       "tackles90"),
+        ("Composure",     "bonus_per_start"),
+        ("Decisions",     "bps90"),
+        ("Determination", "starts_ratio"),
+        ("Flair",         "xa90"),
+        ("Off The Ball",  "xgi90"),
+        ("Teamwork",      "assists90"),
+    ],
+    "physical": [
+        ("Acceleration",    "threat90"),
+        ("Agility",          "xgi90"),
+        ("Balance",           "ict90"),
+        ("Jumping",           "cbi90"),
+        ("Natural Fitness",  "avail"),
+        ("Pace",             "threat90"),
+        ("Set Pieces",       "bonus_per_start"),
+        ("Stamina",          "starts_ratio"),
+        ("Strength",          "cbi90"),
+    ],
+}
+
+_CM_GKP_SCHEMA = {
+    "technical": [
+        ("Handling",        "saves90"),
+        ("Kicking",         "creativity90"),
+        ("Distribution",    "creativity90"),
+        ("Reflexes",        "saves90"),
+        ("One on Ones",     "cs90"),
+        ("Command of Area", "defcon90"),
+        ("Aerial Reach",    "cbi90"),
+        ("Throwing",        "recoveries90"),
+        ("Technique",       "ict90"),
+    ],
+    "mental": [
+        ("Decisions",     "bps90"),
+        ("Anticipation",  "recoveries90"),
+        ("Composure",     "bonus_per_start"),
+        ("Concentration", "gc90"),
+        ("Bravery",       "cbi90"),
+        ("Communication", "defcon90"),
+        ("Determination", "starts_ratio"),
+        ("Positioning",   "cs90"),
+        ("Teamwork",      "assists90"),
+    ],
+    "physical": [
+        ("Agility",          "saves90"),
+        ("Balance",           "ict90"),
+        ("Jumping",            "cbi90"),
+        ("Natural Fitness",   "avail"),
+        ("Pace",              "recoveries90"),
+        ("Reach",              "cbi90"),
+        ("Stamina",           "starts_ratio"),
+        ("Strength",           "defcon90"),
+        ("Throwing Power",    "recoveries90"),
+    ],
+}
+
+_CM_REVERSE_METRICS = {"gc90"}   # lower raw value = better attribute
+
+def build_cm_attributes(players_raw):
+    """
+    Returns {player_id: {"attrs": {"technical": {...9}, "mental": {...9},
+    "physical": {...9}}, "confidence": "low"|"med"|"high"}} for every
+    outfield/GK player in players_raw (raw FPL bootstrap-static elements).
+    """
+    import bisect
+
+    def per90(total, minutes):
+        return (total / minutes * 90) if minutes and minutes > 0 else 0.0
+
+    MIN_MINUTES = 90  # need at least a full match's worth of data to rank
+    raw_metrics = {}
+
+    for p in players_raw.values():
+        pos = POS_MAP.get(p.get("element_type"))
+        if pos is None:
+            continue
+        minutes   = p.get("minutes", 0) or 0
+        starts    = int(p.get("starts") or 0)
+        games_est = max(1, round(minutes / 90)) if minutes else 1
+        xg_total  = float(p.get("expected_goals") or 0)
+        goals     = float(p.get("goals_scored") or 0)
+        chance    = p.get("chance_of_playing_next_round")
+
+        m = {
+            "creativity90":    per90(float(p.get("creativity") or 0), minutes),
+            "threat90":        per90(float(p.get("threat") or 0), minutes),
+            "ict90":           per90(float(p.get("ict_index") or 0), minutes),
+            "xg90":            float(p.get("expected_goals_per_90") or 0),
+            "xa90":            float(p.get("expected_assists_per_90") or 0),
+            "xgi90":           float(p.get("expected_goal_involvements_per_90") or 0),
+            "saves90":         float(p.get("saves_per_90") or 0),
+            "cs90":            float(p.get("clean_sheets_per_90") or 0),
+            "gc90":            float(p.get("goals_conceded_per_90") or 0),
+            "defcon90":        float(p.get("defensive_contribution_per_90") or 0),
+            "cbi90":           per90(float(p.get("clearances_blocks_interceptions") or 0), minutes),
+            "recoveries90":    per90(float(p.get("recoveries") or 0), minutes),
+            "tackles90":       per90(float(p.get("tackles") or 0), minutes),
+            "bps90":           per90(float(p.get("bps") or 0), minutes),
+            "assists90":       per90(float(p.get("assists") or 0), minutes),
+            "cards90":         per90(float(p.get("yellow_cards") or 0) + float(p.get("red_cards") or 0) * 2, minutes),
+            "bonus_per_start": (float(p.get("bonus") or 0) / max(1, starts)) if starts
+                                else (float(p.get("bonus") or 0) / games_est * 0.5),
+            "starts_ratio":    min(starts / games_est, 1.0) if minutes else 0.0,
+            "avail":           (chance if chance is not None else 100) / 100,
+        }
+        raw_metrics[p["id"]] = (pos, minutes, m)
+
+    # Sorted per-position pools, one per metric, built only from players with
+    # a real sample of minutes so single-cameo noise doesn't skew the ranks
+    pools = {pos: {} for pos in ("GKP", "DEF", "MID", "FWD")}
+    for pos in pools:
+        qualifying = [m for (ppos, minutes, m) in raw_metrics.values()
+                      if ppos == pos and minutes >= MIN_MINUTES]
+        if not qualifying:
+            continue
+        for key in qualifying[0]:
+            pools[pos][key] = sorted(x[key] for x in qualifying)
+
+    def percentile(pos, key, value):
+        vals = pools[pos].get(key) or []
+        if not vals:
+            return 50.0
+        return bisect.bisect_right(vals, value) / len(vals) * 100
+
+    def to20(pct, pid, label):
+        return max(1, min(20, round(1 + pct / 100 * 19) + _cm_jitter(pid, label)))
+
+    out = {}
+    for pid, (pos, minutes, m) in raw_metrics.items():
+        schema = _CM_GKP_SCHEMA if pos == "GKP" else _CM_OUTFIELD_SCHEMA
+        confidence = "low" if minutes < MIN_MINUTES else ("med" if minutes < 900 else "high")
+        attrs = {}
+        for col, rows in schema.items():
+            col_out = {}
+            for label, key in rows:
+                pct = percentile(pos, key, m[key])
+                if key in _CM_REVERSE_METRICS:
+                    pct = 100 - pct
+                col_out[label] = to20(pct, pid, label)
+            attrs[col] = col_out
+        out[pid] = {"attrs": attrs, "confidence": confidence}
+    return out
+
+# ---------------------------------------------------------------------------
 # Player enrichment
 # ---------------------------------------------------------------------------
 
@@ -1088,6 +1266,7 @@ def serialize_player(p):
         "price_rising","price_falling","net_transfers","price_change",
         "ownership","differential_score","opp_adj","form_trend","form_trend_label",
         "rotation_risk","rotation_risk_label","fixes",
+        "cm_attrs","cm_confidence",
     ]}
     # Add 4-GW projections — used for DGW sort and planner
     if "projections" not in p:
@@ -1206,7 +1385,8 @@ def api_load():
     fix_map    = build_fix_map(fixtures, teams, current_gw)
     dgw_map    = get_dgw_map(fix_map, current_gw)
     bgw_set    = get_bgw_set(fix_map, current_gw)
-    team_stats = build_team_stats(players_raw)
+    team_stats     = build_team_stats(players_raw)
+    cm_attrs_by_id = build_cm_attributes(players_raw)
 
     # Fetch user history first — we need it to identify any Free Hit GWs
     # before deciding which picks GW to load from
@@ -1267,6 +1447,17 @@ def api_load():
             if p.get("status") not in ("u",) and p.get("minutes", 0) > 0
             and float(p.get("form") or 0) > 0
         ]
+
+        # Attach CM-style attribute ratings (real-data-derived) to every
+        # player the frontend can open a profile for
+        for _p in my_squad:
+            _ca = cm_attrs_by_id.get(_p["id"], {})
+            _p["cm_attrs"]      = _ca.get("attrs", {})
+            _p["cm_confidence"] = _ca.get("confidence", "low")
+        for _p in all_players:
+            _ca = cm_attrs_by_id.get(_p["id"], {})
+            _p["cm_attrs"]      = _ca.get("attrs", {})
+            _p["cm_confidence"] = _ca.get("confidence", "low")
     except Exception as e:
         import traceback
         return jsonify({"error": f"Failed to process squad data: {e}",
