@@ -204,9 +204,12 @@ body { font-family:var(--font); background:var(--bg); color:var(--text); font-si
 
 /* ── Pitch ── */
 /* ── My Team new layout ── */
-.myteam-layout { display:flex; gap:12px; align-items:flex-start; }
+/* Fixed-canvas proportions, not fluid stretch — the right column is sized
+   to its content (like a CM side panel), never stretched to fill leftover
+   browser width. */
+.myteam-layout { display:flex; gap:10px; align-items:flex-start; }
 .myteam-left   { flex:0 0 auto; }
-.myteam-right  { flex:1; min-width:0; display:flex; flex-direction:column; gap:10px; }
+.myteam-right  { flex:0 0 360px; width:360px; min-width:0; display:flex; flex-direction:column; }
 
 .pitch-wrap { display:block; }
 
@@ -267,24 +270,31 @@ body { font-family:var(--font); background:var(--bg); color:var(--text); font-si
 .bench-label { font-size:9px; font-weight:700; color:var(--text3);
   letter-spacing:.8px; text-transform:uppercase; margin-bottom:2px; }
 
-/* Side info panel */
-.team-side-panel { display:flex; flex-direction:column; gap:6px; }
-.tsp-card {
-  background:var(--surface); border-radius:0; padding:8px 10px;
+/* Side info panel — ONE continuous tiled surface (CM listbox convention):
+   a single outer bevel, sections separated by a title-strip header instead
+   of gaps + their own border, flush edge-to-edge, no floating cards. */
+.team-side-panel {
+  display:flex; flex-direction:column; background:var(--surface);
   box-shadow:
     inset 1px 1px 0 var(--bevel-lt2), inset -1px -1px 0 var(--bevel-dk2),
     inset 2px 2px 0 var(--bevel-lt),  inset -2px -2px 0 var(--bevel-dk);
 }
-.tsp-title { font-size:8px; font-weight:800; color:var(--text3); text-transform:uppercase;
-  letter-spacing:.7px; margin-bottom:5px; }
+.tsp-card { padding:0; border-top:1px solid var(--bevel-dk); }
+.tsp-card:first-child { border-top:none; }
+.tsp-card-body { padding:7px 10px 9px; }
+.tsp-title {
+  font-size:9px; font-weight:800; color:#fff; text-transform:uppercase;
+  letter-spacing:.6px; background:var(--navy); padding:3px 10px;
+}
 .tsp-cap-name { font-size:14px; font-weight:900; color:var(--text); line-height:1.1; }
 .tsp-cap-meta { font-size:10px; color:var(--text2); margin-top:2px; }
 .tsp-cap-score { font-size:10px; color:var(--text3); margin-top:1px; }
 .tsp-transfer-row { display:flex; justify-content:space-between; align-items:center;
   padding:3px 0; border-bottom:1px solid var(--border); font-size:11px; }
 .tsp-transfer-row:last-child { border-bottom:none; }
+.tsp-stat-grid { display:grid; grid-template-columns:1fr 1fr; gap:0 10px; }
 .tsp-stat-row { display:flex; justify-content:space-between; align-items:center;
-  padding:3px 0; font-size:11px; }
+  padding:3px 0; font-size:11px; border-bottom:1px solid var(--border); }
 .tsp-injury-row { display:flex; align-items:center; gap:5px; padding:3px 0;
   border-bottom:1px solid var(--border); font-size:11px; }
 .tsp-injury-row:last-child { border-bottom:none; }
@@ -952,6 +962,6 @@ body { font-family:var(--font); background:var(--bg); color:var(--text); font-si
 }
 </style>
 
-<script src="/static/app.js?v=11"></script>
+<script src="/static/app.js?v=12"></script>
 </body>
 </html>
