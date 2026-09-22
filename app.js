@@ -802,9 +802,8 @@ function renderMyTeam(squad, dgwSummary, allPlayers, meta) {
   ].filter(Boolean).join(" · ") : "";
 
   const capBanner = capPick ? `
-    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
-      <div style="flex:1;min-width:200px;background:var(--surface);border:1px solid var(--border);
-        border-radius:0;padding:10px 14px;border-left:4px solid #0c6e6e">
+    <div class="win-raised" style="display:flex;flex-wrap:wrap;margin-bottom:8px;background:var(--surface)">
+      <div style="flex:1;min-width:200px;padding:8px 14px;border-left:4px solid #0c6e6e">
         <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;
           letter-spacing:.5px;margin-bottom:3px">Suggested captain</div>
         <div style="font-size:15px;font-weight:800">${capPick.name}
@@ -812,9 +811,8 @@ function renderMyTeam(squad, dgwSummary, allPlayers, meta) {
         </div>
         <div style="font-size:11px;color:var(--text2);margin-top:2px">${capReason}</div>
       </div>
-      ${vcPick ? `<div style="flex:1;min-width:200px;background:var(--surface);
-        border:1px solid var(--border);border-radius:0;padding:10px 14px;
-        border-left:4px solid var(--border2)">
+      ${vcPick ? `<div style="flex:1;min-width:200px;padding:8px 14px;
+        border-left:1px solid var(--border)">
         <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;
           letter-spacing:.5px;margin-bottom:3px">Vice captain</div>
         <div style="font-size:15px;font-weight:800">${vcPick.name}
@@ -850,8 +848,8 @@ function renderMyTeam(squad, dgwSummary, allPlayers, meta) {
   const formChanged = currentForm !== suggestedForm;
 
   const formBanner = formChanged ? `
-    <div style="background:var(--amber-bg);border:1px solid #e8c840;border-radius:0;
-      padding:8px 14px;margin-bottom:12px;font-size:12px;color:var(--amber-fg)">
+    <div style="background:var(--amber-bg);border-left:3px solid var(--amber-fg);
+      padding:6px 14px;margin-bottom:8px;font-size:12px;color:var(--amber-fg)">
       💡 Suggested formation: <strong>${suggestedForm}</strong>
       (current: ${currentForm}) — based on highest composite scorers in each position
     </div>` : "";
@@ -893,8 +891,8 @@ function renderMyTeam(squad, dgwSummary, allPlayers, meta) {
         ${changed ? `<span style="font-size:9px;color:var(--amber)">(was ${currentSlot})</span>` : `<span style="font-size:9px;color:var(--text3)">✓</span>`}
       </div>`;
     }).join("");
-    return `<div style="background:var(--blue-bg);border:1px solid var(--border);
-      border-radius:0;padding:10px 14px;margin-bottom:12px">
+    return `<div style="background:var(--blue-bg);border-left:3px solid var(--blue-fg);
+      padding:8px 14px;margin-top:6px">
       <div style="font-size:10px;font-weight:700;color:var(--blue-fg);text-transform:uppercase;
         letter-spacing:.5px;margin-bottom:8px">💺 Suggested bench order</div>
       ${rows}
@@ -923,8 +921,8 @@ function renderMyTeam(squad, dgwSummary, allPlayers, meta) {
                   && p.status==="a" && (p.chance==null||p.chance>=75) && p.starts>=5)
         .sort((a,b)=>b.composite-a.composite).slice(0,5);
 
-      return `<div style="background:var(--purple-bg);border:1px solid var(--border);border-left:3px solid var(--purple-fg);
-        border-radius:0;padding:7px 12px;margin-bottom:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      return `<div style="background:var(--purple-bg);border-left:3px solid var(--purple-fg);
+        padding:6px 12px;margin-bottom:4px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <span style="font-size:13px">${urgency}</span>
         <div style="flex:1;min-width:0">
           <span style="font-size:11px;font-weight:800;color:var(--purple-fg)">${gwLbl} DGW · </span>
@@ -940,12 +938,14 @@ function renderMyTeam(squad, dgwSummary, allPlayers, meta) {
   // Captain card
   const sideCapFix = capPick?.fixes?.[0];
   const sideCapCard = capPick ? `
-    <div class="tsp-card" style="border-left:3px solid #0c6e6e">
+    <div class="tsp-card">
       <div class="tsp-title">Suggested captain</div>
-      <div class="tsp-cap-name">${capPick.name} ${dgwBadge(capPick)}</div>
-      <div class="tsp-cap-meta">${sideCapFix ? `vs ${sideCapFix.opp} (${sideCapFix.home?"H":"A"}) · FDR ${sideCapFix.fdr}` : "TBC"}</div>
-      <div class="tsp-cap-score">xGI/90: ${capPick.xgi90 ? capPick.xgi90.toFixed(2) : "—"} · Score: ${capPick.composite}</div>
-      ${vcPick ? `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:11px;color:var(--text3)">VC: <strong style="color:var(--text2)">${vcPick.name}</strong>${vcPick.fixes?.[0]?' · vs '+vcPick.fixes[0].opp:''}</div>` : ""}
+      <div class="tsp-card-body">
+        <div class="tsp-cap-name">${capPick.name} ${dgwBadge(capPick)}</div>
+        <div class="tsp-cap-meta">${sideCapFix ? `vs ${sideCapFix.opp} (${sideCapFix.home?"H":"A"}) · FDR ${sideCapFix.fdr}` : "TBC"}</div>
+        <div class="tsp-cap-score">xGI/90: ${capPick.xgi90 ? capPick.xgi90.toFixed(2) : "—"} · Score: ${capPick.composite}</div>
+        ${vcPick ? `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:11px;color:var(--text3)">VC: <strong style="color:var(--text2)">${vcPick.name}</strong>${vcPick.fixes?.[0]?' · vs '+vcPick.fixes[0].opp:''}</div>` : ""}
+      </div>
     </div>` : "";
 
   // Top transfer card
@@ -955,31 +955,35 @@ function renderMyTeam(squad, dgwSummary, allPlayers, meta) {
   const sideTransferCard = topTransfers.length ? `
     <div class="tsp-card">
       <div class="tsp-title">Top transfers</div>
-      ${topTransfers.map(o=>`
-        <div class="tsp-transfer-row">
-          <div>
-            <span style="color:var(--text3);text-decoration:line-through;font-size:11px">${o.outName}</span>
-            <span style="margin:0 4px;color:var(--text3)">→</span>
-            <strong>${o.in.name}</strong>
-          </div>
-          <div style="display:flex;gap:6px;align-items:center">
-            <span class="badge ${VERDICT_CLS[o.verdict]||'badge-gray'}">${o.verdict}</span>
-            <span style="font-size:11px;color:var(--green-fg);font-weight:700">+${o.gain}</span>
-          </div>
-        </div>`).join("")}
+      <div class="tsp-card-body">
+        ${topTransfers.map(o=>`
+          <div class="tsp-transfer-row">
+            <div>
+              <span style="color:var(--text3);text-decoration:line-through;font-size:11px">${o.outName}</span>
+              <span style="margin:0 4px;color:var(--text3)">→</span>
+              <strong>${o.in.name}</strong>
+            </div>
+            <div style="display:flex;gap:6px;align-items:center">
+              <span class="badge ${VERDICT_CLS[o.verdict]||'badge-gray'}">${o.verdict}</span>
+              <span style="font-size:11px;color:var(--green-fg);font-weight:700">+${o.gain}</span>
+            </div>
+          </div>`).join("")}
+      </div>
     </div>` : "";
 
   // Injury / availability card
   const injuredPlayers = starters.filter(p => p.news || (p.chance != null && p.chance < 100));
   const sideInjCard = injuredPlayers.length ? `
-    <div class="tsp-card" style="border-left:3px solid var(--amber)">
-      <div class="tsp-title">⚠ Fitness alerts</div>
-      ${injuredPlayers.map(p=>`
-        <div class="tsp-injury-row">
-          <span style="font-weight:700;flex:1">${p.name}</span>
-          <span style="font-size:10px;color:var(--amber-fg)">${p.chance!=null?p.chance+'%':''}</span>
-          ${p.news ? `<span style="font-size:10px;color:var(--text3);max-width:120px;text-align:right">${p.news.slice(0,40)}${p.news.length>40?'…':''}</span>` : ''}
-        </div>`).join("")}
+    <div class="tsp-card">
+      <div class="tsp-title" style="background:var(--amber-fg)">⚠ Fitness alerts</div>
+      <div class="tsp-card-body">
+        ${injuredPlayers.map(p=>`
+          <div class="tsp-injury-row">
+            <span style="font-weight:700;flex:1">${p.name}</span>
+            <span style="font-size:10px;color:var(--amber-fg)">${p.chance!=null?p.chance+'%':''}</span>
+            ${p.news ? `<span style="font-size:10px;color:var(--text3);max-width:120px;text-align:right">${p.news.slice(0,40)}${p.news.length>40?'…':''}</span>` : ''}
+          </div>`).join("")}
+      </div>
     </div>` : "";
 
   // Squad stats card
@@ -988,11 +992,15 @@ function renderMyTeam(squad, dgwSummary, allPlayers, meta) {
   const sideStatsCard = `
     <div class="tsp-card">
       <div class="tsp-title">Squad stats</div>
-      <div class="tsp-stat-row"><span style="color:var(--text3)">Formation</span><strong>${currentForm}</strong></div>
-      <div class="tsp-stat-row"><span style="color:var(--text3)">Total score</span><strong>${totalComp}</strong></div>
-      <div class="tsp-stat-row"><span style="color:var(--text3)">Avg form</span><strong>${avgForm}</strong></div>
-      <div class="tsp-stat-row"><span style="color:var(--text3)">Squad value</span><strong>£${(meta.squad_value||0).toFixed(1)}m</strong></div>
-      <div class="tsp-stat-row"><span style="color:var(--text3)">Bank</span><strong>£${(meta.bank||0).toFixed(1)}m</strong></div>
+      <div class="tsp-card-body">
+        <div class="tsp-stat-grid">
+          <div class="tsp-stat-row"><span style="color:var(--text3)">Formation</span><strong>${currentForm}</strong></div>
+          <div class="tsp-stat-row"><span style="color:var(--text3)">Total score</span><strong>${totalComp}</strong></div>
+          <div class="tsp-stat-row"><span style="color:var(--text3)">Avg form</span><strong>${avgForm}</strong></div>
+          <div class="tsp-stat-row"><span style="color:var(--text3)">Squad value</span><strong>£${(meta.squad_value||0).toFixed(1)}m</strong></div>
+          <div class="tsp-stat-row"><span style="color:var(--text3)">Bank</span><strong>£${(meta.bank||0).toFixed(1)}m</strong></div>
+        </div>
+      </div>
     </div>`;
 
   el("tab-myteam").innerHTML = `
