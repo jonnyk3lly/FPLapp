@@ -4584,42 +4584,36 @@ function openProfileCompare() {
   openComparison(_profilePlayerId);
 }
 
-// CM-style attribute grid — built from p.cm_attrs (real FPL data, percentile-
-// ranked within position; see build_cm_attributes() in app.py). Attribute
-// values are 1-20 CM-scale ratings, not raw FPL numbers.
+// Real-stats grid — built from p.real_stats (see build_real_stats() in
+// app.py). Every label is an actual named FPL API field and every value is
+// the real number for that player — nothing here is a derived or invented
+// rating. Colour (green/amber/red) is just a percentile-within-position
+// read on the real value, applied via the "cls" the backend already computed.
 function buildAttributeGrid(p) {
-  const attrs = p.cm_attrs;
-  if (!attrs || !attrs.technical) return "";
+  const columns = p.real_stats;
+  if (!columns || !columns.length) return "";
 
-  function vClass(v) {
-    return v >= 14 ? "cm-v-hi" : v >= 8 ? "cm-v-mid" : "cm-v-lo";
-  }
-  function column(title, rows) {
-    const entries = Object.entries(rows || {});
-    return `<div class="cm-attr-col-title">${title}</div>` + entries.map(([label, val]) => `
+  const clsMap = {hi:"cm-v-hi", mid:"cm-v-mid", lo:"cm-v-lo"};
+  function column(col) {
+    return `<div class="cm-attr-col-title">${col.title}</div>` + (col.rows || []).map(r => `
       <div class="cm-attr-row">
-        <span class="cm-attr-label">${label}</span>
-        <span class="cm-attr-val ${vClass(val)}">${val}</span>
+        <span class="cm-attr-label">${r.label}</span>
+        <span class="cm-attr-val ${clsMap[r.cls]||""}">${r.value}</span>
       </div>`).join("");
   }
-
-  const confLabel = {high:"Full season sample", med:"Partial sample", low:"Small sample — early read"}[p.cm_confidence] || "";
 
   return `
     <div class="cm-attr-panel">
       <div class="cm-attr-tabs">
-        <div class="cm-attr-tab active">Attributes</div>
+        <div class="cm-attr-tab active">Real stats</div>
       </div>
       <div class="cm-attr-body">
         <div class="cm-crowd-texture"></div>
         <div class="cm-attr-scrim"></div>
         <div class="cm-attr-grid">
-          ${column("Technical", attrs.technical)}
-          ${column("Mental", attrs.mental)}
-          ${column("Physical", attrs.physical)}
+          ${columns.map(column).join("")}
         </div>
       </div>
-      ${confLabel ? `<div class="cm-attr-confidence">${confLabel}</div>` : ""}
     </div>`;
 }
 
