@@ -228,152 +228,68 @@ def build_team_stats(players_raw):
     return result
 
 # ---------------------------------------------------------------------------
-# CM-style attribute ratings — derived from real FPL data
+# Real per-player stats — for the profile "attribute grid" panel
 # ---------------------------------------------------------------------------
 #
-# FPL's API carries no biomechanical data (no real pace, jumping, heading
-# stats) — so every attribute below is a 1-20 rating built from a real
-# statistical proxy, ranked by PERCENTILE against every other player in the
-# same position this season. Several attributes share an underlying proxy
-# metric (there just aren't 27 independent signals in the data); a small
-# deterministic per-attribute offset keeps them from reading as duplicates
-# on screen while staying grounded in the same real numbers every time the
-# same player is viewed.
+# These are the ACTUAL named FPL API fields, not a derived rating: the label
+# on screen matches the real stat, and the value is the real number. Colour
+# (green/amber/red) is a percentile rank against other players in the same
+# position this season, purely for at-a-glance reading — the underlying
+# number is never altered or invented.
 
-def _cm_jitter(player_id, label):
-    h = 0
-    for ch in f"{player_id}:{label}":
-        h = (h * 31 + ord(ch)) & 0xffffffff
-    return (h % 5) - 2   # deterministic -2..+2
+def _pct_class(pct, reverse=False):
+    if reverse:
+        pct = 100 - pct
+    return "hi" if pct >= 66 else ("mid" if pct >= 33 else "lo")
 
-_CM_OUTFIELD_SCHEMA = {
-    "technical": [
-        ("Crossing",    "creativity90"),
-        ("Dribbling",   "xgi90"),
-        ("Finishing",   "xg90"),
-        ("Heading",     "cbi90"),
-        ("Long Shots",  "threat90"),
-        ("Marking",     "cbi90"),
-        ("Passing",     "creativity90"),
-        ("Tackling",    "tackles90"),
-        ("Technique",   "ict90"),
-    ],
-    "mental": [
-        ("Aggression",    "cards90"),
-        ("Anticipation",  "recoveries90"),
-        ("Bravery",       "tackles90"),
-        ("Composure",     "bonus_per_start"),
-        ("Decisions",     "bps90"),
-        ("Determination", "starts_ratio"),
-        ("Flair",         "xa90"),
-        ("Off The Ball",  "xgi90"),
-        ("Teamwork",      "assists90"),
-    ],
-    "physical": [
-        ("Acceleration",    "threat90"),
-        ("Agility",          "xgi90"),
-        ("Balance",           "ict90"),
-        ("Jumping",           "cbi90"),
-        ("Natural Fitness",  "avail"),
-        ("Pace",             "threat90"),
-        ("Set Pieces",       "bonus_per_start"),
-        ("Stamina",          "starts_ratio"),
-        ("Strength",          "cbi90"),
-    ],
-}
-
-_CM_GKP_SCHEMA = {
-    "technical": [
-        ("Handling",        "saves90"),
-        ("Kicking",         "creativity90"),
-        ("Distribution",    "creativity90"),
-        ("Reflexes",        "saves90"),
-        ("One on Ones",     "cs90"),
-        ("Command of Area", "defcon90"),
-        ("Aerial Reach",    "cbi90"),
-        ("Throwing",        "recoveries90"),
-        ("Technique",       "ict90"),
-    ],
-    "mental": [
-        ("Decisions",     "bps90"),
-        ("Anticipation",  "recoveries90"),
-        ("Composure",     "bonus_per_start"),
-        ("Concentration", "gc90"),
-        ("Bravery",       "cbi90"),
-        ("Communication", "defcon90"),
-        ("Determination", "starts_ratio"),
-        ("Positioning",   "cs90"),
-        ("Teamwork",      "assists90"),
-    ],
-    "physical": [
-        ("Agility",          "saves90"),
-        ("Balance",           "ict90"),
-        ("Jumping",            "cbi90"),
-        ("Natural Fitness",   "avail"),
-        ("Pace",              "recoveries90"),
-        ("Reach",              "cbi90"),
-        ("Stamina",           "starts_ratio"),
-        ("Strength",           "defcon90"),
-        ("Throwing Power",    "recoveries90"),
-    ],
-}
-
-_CM_REVERSE_METRICS = {"gc90"}   # lower raw value = better attribute
-
-def build_cm_attributes(players_raw):
+def build_real_stats(players_raw):
     """
-    Returns {player_id: {"attrs": {"technical": {...9}, "mental": {...9},
-    "physical": {...9}}, "confidence": "low"|"med"|"high"}} for every
-    outfield/GK player in players_raw (raw FPL bootstrap-static elements).
+    Returns {player_id: {"columns": [{"title": str, "rows": [{"label","value","cls"}]}]}}
+    built entirely from real bootstrap-static fields, grouped by position.
     """
     import bisect
 
     def per90(total, minutes):
         return (total / minutes * 90) if minutes and minutes > 0 else 0.0
 
-    MIN_MINUTES = 90  # need at least a full match's worth of data to rank
-    raw_metrics = {}
-
+    MIN_MINUTES = 90
+    raw = {}
     for p in players_raw.values():
         pos = POS_MAP.get(p.get("element_type"))
         if pos is None:
             continue
-        minutes   = p.get("minutes", 0) or 0
-        starts    = int(p.get("starts") or 0)
-        games_est = max(1, round(minutes / 90)) if minutes else 1
-        xg_total  = float(p.get("expected_goals") or 0)
-        goals     = float(p.get("goals_scored") or 0)
-        chance    = p.get("chance_of_playing_next_round")
-
-        m = {
-            "creativity90":    per90(float(p.get("creativity") or 0), minutes),
-            "threat90":        per90(float(p.get("threat") or 0), minutes),
-            "ict90":           per90(float(p.get("ict_index") or 0), minutes),
-            "xg90":            float(p.get("expected_goals_per_90") or 0),
-            "xa90":            float(p.get("expected_assists_per_90") or 0),
-            "xgi90":           float(p.get("expected_goal_involvements_per_90") or 0),
-            "saves90":         float(p.get("saves_per_90") or 0),
-            "cs90":            float(p.get("clean_sheets_per_90") or 0),
-            "gc90":            float(p.get("goals_conceded_per_90") or 0),
-            "defcon90":        float(p.get("defensive_contribution_per_90") or 0),
-            "cbi90":           per90(float(p.get("clearances_blocks_interceptions") or 0), minutes),
-            "recoveries90":    per90(float(p.get("recoveries") or 0), minutes),
-            "tackles90":       per90(float(p.get("tackles") or 0), minutes),
-            "bps90":           per90(float(p.get("bps") or 0), minutes),
-            "assists90":       per90(float(p.get("assists") or 0), minutes),
-            "cards90":         per90(float(p.get("yellow_cards") or 0) + float(p.get("red_cards") or 0) * 2, minutes),
-            "bonus_per_start": (float(p.get("bonus") or 0) / max(1, starts)) if starts
-                                else (float(p.get("bonus") or 0) / games_est * 0.5),
-            "starts_ratio":    min(starts / games_est, 1.0) if minutes else 0.0,
-            "avail":           (chance if chance is not None else 100) / 100,
+        minutes = p.get("minutes", 0) or 0
+        vals = {
+            "goals":        float(p.get("goals_scored") or 0),
+            "assists":      float(p.get("assists") or 0),
+            "bonus":        float(p.get("bonus") or 0),
+            "bps":          float(p.get("bps") or 0),
+            "influence":    float(p.get("influence") or 0),
+            "creativity":   float(p.get("creativity") or 0),
+            "threat":       float(p.get("threat") or 0),
+            "ict_index":    float(p.get("ict_index") or 0),
+            "xg90":         float(p.get("expected_goals_per_90") or 0),
+            "xa90":         float(p.get("expected_assists_per_90") or 0),
+            "xgi90":        float(p.get("expected_goal_involvements_per_90") or 0),
+            "xgc90":        float(p.get("expected_goals_conceded_per_90") or 0),
+            "tackles":      float(p.get("tackles") or 0),
+            "cbi":          float(p.get("clearances_blocks_interceptions") or 0),
+            "recoveries":   float(p.get("recoveries") or 0),
+            "defcon":       float(p.get("defensive_contribution") or 0),
+            "yellow":       float(p.get("yellow_cards") or 0),
+            "red":          float(p.get("red_cards") or 0),
+            "saves":        float(p.get("saves") or 0),
+            "saves90":      float(p.get("saves_per_90") or 0),
+            "clean_sheets": float(p.get("clean_sheets") or 0),
+            "cs90":         float(p.get("clean_sheets_per_90") or 0),
+            "gc90":         float(p.get("goals_conceded_per_90") or 0),
+            "pen_saved":    float(p.get("penalties_saved") or 0),
         }
-        raw_metrics[p["id"]] = (pos, minutes, m)
+        raw[p["id"]] = (pos, minutes, vals)
 
-    # Sorted per-position pools, one per metric, built only from players with
-    # a real sample of minutes so single-cameo noise doesn't skew the ranks
     pools = {pos: {} for pos in ("GKP", "DEF", "MID", "FWD")}
     for pos in pools:
-        qualifying = [m for (ppos, minutes, m) in raw_metrics.values()
+        qualifying = [v for (ppos, minutes, v) in raw.values()
                       if ppos == pos and minutes >= MIN_MINUTES]
         if not qualifying:
             continue
@@ -386,23 +302,64 @@ def build_cm_attributes(players_raw):
             return 50.0
         return bisect.bisect_right(vals, value) / len(vals) * 100
 
-    def to20(pct, pid, label):
-        return max(1, min(20, round(1 + pct / 100 * 19) + _cm_jitter(pid, label)))
+    def row(pos, v, key, label, fmt, reverse=False):
+        pct = percentile(pos, key, v[key])
+        return {"label": label, "value": fmt(v[key]), "cls": _pct_class(pct, reverse)}
+
+    i1 = lambda x: str(int(round(x)))
+    f2 = lambda x: f"{x:.2f}"
 
     out = {}
-    for pid, (pos, minutes, m) in raw_metrics.items():
-        schema = _CM_GKP_SCHEMA if pos == "GKP" else _CM_OUTFIELD_SCHEMA
-        confidence = "low" if minutes < MIN_MINUTES else ("med" if minutes < 900 else "high")
-        attrs = {}
-        for col, rows in schema.items():
-            col_out = {}
-            for label, key in rows:
-                pct = percentile(pos, key, m[key])
-                if key in _CM_REVERSE_METRICS:
-                    pct = 100 - pct
-                col_out[label] = to20(pct, pid, label)
-            attrs[col] = col_out
-        out[pid] = {"attrs": attrs, "confidence": confidence}
+    for pid, (pos, minutes, v) in raw.items():
+        if pos == "GKP":
+            columns = [
+                {"title": "Shot stopping", "rows": [
+                    row(pos, v, "saves",        "Saves",          i1),
+                    row(pos, v, "saves90",      "Saves/90",       f2),
+                    row(pos, v, "pen_saved",    "Pens saved",     i1),
+                    row(pos, v, "clean_sheets", "Clean sheets",   i1),
+                    row(pos, v, "cs90",         "Clean sheets/90",f2),
+                ]},
+                {"title": "ICT index (season)", "rows": [
+                    row(pos, v, "influence",  "Influence",  i1),
+                    row(pos, v, "creativity", "Creativity", i1),
+                    row(pos, v, "threat",     "Threat",     i1),
+                    row(pos, v, "ict_index",  "ICT Index",  i1),
+                ]},
+                {"title": "Defence & discipline", "rows": [
+                    row(pos, v, "gc90",   "Conceded/90", f2, reverse=True),
+                    row(pos, v, "xgc90",  "xGC/90",       f2, reverse=True),
+                    row(pos, v, "defcon", "Def. contribution", i1),
+                    row(pos, v, "bps",    "BPS",          i1),
+                    row(pos, v, "bonus",  "Bonus",        i1),
+                ]},
+            ]
+        else:
+            columns = [
+                {"title": "Attacking (season)", "rows": [
+                    row(pos, v, "goals",   "Goals",   i1),
+                    row(pos, v, "assists", "Assists", i1),
+                    row(pos, v, "xg90",    "xG/90",   f2),
+                    row(pos, v, "xa90",    "xA/90",   f2),
+                    row(pos, v, "xgi90",   "xGI/90",  f2),
+                    row(pos, v, "bonus",   "Bonus",   i1),
+                ]},
+                {"title": "ICT index (season)", "rows": [
+                    row(pos, v, "influence",  "Influence",  i1),
+                    row(pos, v, "creativity", "Creativity", i1),
+                    row(pos, v, "threat",     "Threat",     i1),
+                    row(pos, v, "ict_index",  "ICT Index",  i1),
+                ]},
+                {"title": "Defence & discipline", "rows": [
+                    row(pos, v, "tackles",    "Tackles",      i1),
+                    row(pos, v, "cbi",        "CBI",          i1),
+                    row(pos, v, "recoveries", "Recoveries",   i1),
+                    row(pos, v, "bps",        "BPS",          i1),
+                    row(pos, v, "yellow",     "Yellow cards", i1, reverse=True),
+                    row(pos, v, "red",        "Red cards",    i1, reverse=True),
+                ]},
+            ]
+        out[pid] = {"columns": columns}
     return out
 
 # ---------------------------------------------------------------------------
@@ -1266,7 +1223,7 @@ def serialize_player(p):
         "price_rising","price_falling","net_transfers","price_change",
         "ownership","differential_score","opp_adj","form_trend","form_trend_label",
         "rotation_risk","rotation_risk_label","fixes",
-        "cm_attrs","cm_confidence",
+        "real_stats",
     ]}
     # Add 4-GW projections — used for DGW sort and planner
     if "projections" not in p:
@@ -1386,7 +1343,7 @@ def api_load():
     dgw_map    = get_dgw_map(fix_map, current_gw)
     bgw_set    = get_bgw_set(fix_map, current_gw)
     team_stats     = build_team_stats(players_raw)
-    cm_attrs_by_id = build_cm_attributes(players_raw)
+    real_stats_by_id = build_real_stats(players_raw)
 
     # Fetch user history first — we need it to identify any Free Hit GWs
     # before deciding which picks GW to load from
@@ -1448,16 +1405,12 @@ def api_load():
             and float(p.get("form") or 0) > 0
         ]
 
-        # Attach CM-style attribute ratings (real-data-derived) to every
-        # player the frontend can open a profile for
+        # Attach real per-player stats (actual FPL fields, not derived) to
+        # every player the frontend can open a profile for
         for _p in my_squad:
-            _ca = cm_attrs_by_id.get(_p["id"], {})
-            _p["cm_attrs"]      = _ca.get("attrs", {})
-            _p["cm_confidence"] = _ca.get("confidence", "low")
+            _p["real_stats"] = real_stats_by_id.get(_p["id"], {}).get("columns", [])
         for _p in all_players:
-            _ca = cm_attrs_by_id.get(_p["id"], {})
-            _p["cm_attrs"]      = _ca.get("attrs", {})
-            _p["cm_confidence"] = _ca.get("confidence", "low")
+            _p["real_stats"] = real_stats_by_id.get(_p["id"], {}).get("columns", [])
     except Exception as e:
         import traceback
         return jsonify({"error": f"Failed to process squad data: {e}",
