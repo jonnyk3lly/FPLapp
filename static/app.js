@@ -412,7 +412,7 @@ function renderDashboard(data) {
     { label: "Team",        key: "team",       tabs: [["myteam","My Team"],["squadbuilder","Squad Builder"]] },
     { label: "Transfers",   key: "transfers",  tabs: [["transfers","Transfers"],["planner","GW Planner"],["chips","Chip Advisor"]] },
     { label: "Intelligence",key: "intel",      tabs: [["rankings","Rankings"],["scout","Scout"],["runin","Run-in"],["fixtures","Fixtures"]] },
-    { label: "Analysis",    key: "analysis",   tabs: [["history","GW History"],["backtest","Backtest"],["seasonreview","Season Review"],["panel","Panel"],["transfers_impact","Transfer Impact"]] },
+    { label: "Analysis",    key: "analysis",   tabs: [["history","GW History"],["backtest","Backtest"],["seasonreview","Season Review"],["panel","Panel"],["transfers_impact","Transfer Impact"],["scoreboard","Flag Scoreboard"]] },
   ];
   window._TAB_GROUPS = TAB_GROUPS;
   renderGroupedTabs(TAB_GROUPS, "team");
@@ -433,6 +433,8 @@ function renderDashboard(data) {
   renderPanelShell();
   renderRunIn(data, m);
   renderTransferImpactShell(m.team_id);
+  renderScoreboardShell();
+  _trends = {}; _trendsLoading = false; loadTrends();
   show("dashboard");
   // First tab-content is now shown by renderGroupedTabs
 }
@@ -723,38 +725,6 @@ function buildGwDecisionBanner(data, meta) {
 
 // ── My Team / Pitch ────────────────────────────────────────────
 
-function playerCard(p, dim=false) {
-  const fix1  = p.fixes?.[0];
-  const fdrC  = fix1 ? FDR_C[fix1.fdr]||"#888" : "#888";
-  const nFix  = fix1 ? `${fix1.opp} (${fix1.home?"H":"A"})` : "TBC";
-  const cap   = p.multiplier===2 ? `<div class="cap-dot">C</div>` : p.multiplier===3 ? `<div class="cap-dot tc">TC</div>` : "";
-  const inj   = p.news ? `<div class="inj-dot" title="${p.news}">⚠️</div>` : "";
-  const pArr  = p.price_rising ? `<div class="price-badge">↑</div>` : p.price_falling ? `<div class="price-badge" style="color:var(--red-fg)">↓</div>` : "";
-
-  // Form trend arrow on card
-  const tLbl = p.form_trend_label || "→";
-  const tC   = tLbl.startsWith("↑") ? "#1a8a26" : tLbl.startsWith("↓") ? "#a3182a" : "var(--text3)";
-  const trendEl = (p.starts >= 5 && tLbl !== "→")
-    ? `<span style="font-size:10px;color:${tC};margin-left:3px">${tLbl}</span>` : "";
-  const rotEl = p.rotation_risk
-    ? `<div style="font-size:9px;color:var(--amber);margin-top:1px"
-        title="${p.rotation_risk_label||''}">🔄 rotation risk</div>` : "";
-
-  return `<div class="pcard${dim?" dim":""}" data-pid="${p.id}" style="cursor:pointer">
-    ${cap}${inj}${pArr}
-    <img src="${p.shirt}" onerror="this.style.display='none'" alt="">
-    <div class="pname">${p.name}</div>
-    <div class="pteam">${p.team_name} · £${p.price}m</div>
-    <div class="pform">${p.form}${trendEl}</div>
-    <div class="pform-lbl">form</div>
-    <div class="fdr-row">${fdrSq(p.fixes,3)}</div>
-    <div style="font-size:9px;color:${fdrC};margin-top:2px">${nFix}</div>
-    ${dgwBadge(p)}
-    ${p.availability < 1 && p.availability > 0 ? `<div style="font-size:9px;color:var(--amber);margin-top:1px">${Math.round(p.availability*100)}% avail.</div>` : ""}
-    ${rotEl}
-  </div>`;
-}
-
 function pitchRow(players, label) {
   return `<div class="pitch-row">
     <div class="pitch-row-label">${label}</div>
@@ -934,106 +904,30 @@ function renderMyTeam(squad, dgwSummary, allPlayers, meta) {
     }).join("");
   })() : "";
 
-  // ── Build side info panel ─────────────────────────────────────
-  // Captain card
-  const sideCapFix = capPick?.fixes?.[0];
-  const sideCapCard = capPick ? `
-    <div class="tsp-card">
-      <div class="tsp-title">Suggested captain</div>
-      <div class="tsp-card-body">
-        <div class="tsp-cap-name">${capPick.name} ${dgwBadge(capPick)}</div>
-        <div class="tsp-cap-meta">${sideCapFix ? `vs ${sideCapFix.opp} (${sideCapFix.home?"H":"A"}) · FDR ${sideCapFix.fdr}` : "TBC"}</div>
-        <div class="tsp-cap-score">xGI/90: ${capPick.xgi90 ? capPick.xgi90.toFixed(2) : "—"} · Score: ${capPick.composite}</div>
-        ${vcPick ? `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:11px;color:var(--text3)">VC: <strong style="color:var(--text2)">${vcPick.name}</strong>${vcPick.fixes?.[0]?' · vs '+vcPick.fixes[0].opp:''}</div>` : ""}
-      </div>
-    </div>` : "";
-
-  // Top transfer card
-  const allOpts = (_state.transfers||[]).flatMap(g=>g.options.map(o=>({...o,outName:g.out.name})));
-  allOpts.sort((a,b)=>b.gain-a.gain);
-  const topTransfers = allOpts.slice(0,3);
-  const sideTransferCard = topTransfers.length ? `
-    <div class="tsp-card">
-      <div class="tsp-title">Top transfers</div>
-      <div class="tsp-card-body">
-        ${topTransfers.map(o=>`
-          <div class="tsp-transfer-row">
-            <div>
-              <span style="color:var(--text3);text-decoration:line-through;font-size:11px">${o.outName}</span>
-              <span style="margin:0 4px;color:var(--text3)">→</span>
-              <strong>${o.in.name}</strong>
-            </div>
-            <div style="display:flex;gap:6px;align-items:center">
-              <span class="badge ${VERDICT_CLS[o.verdict]||'badge-gray'}">${o.verdict}</span>
-              <span style="font-size:11px;color:var(--green-fg);font-weight:700">+${o.gain}</span>
-            </div>
-          </div>`).join("")}
-      </div>
-    </div>` : "";
-
-  // Injury / availability card
-  const injuredPlayers = starters.filter(p => p.news || (p.chance != null && p.chance < 100));
-  const sideInjCard = injuredPlayers.length ? `
-    <div class="tsp-card">
-      <div class="tsp-title" style="background:var(--amber-fg)">⚠ Fitness alerts</div>
-      <div class="tsp-card-body">
-        ${injuredPlayers.map(p=>`
-          <div class="tsp-injury-row">
-            <span style="font-weight:700;flex:1">${p.name}</span>
-            <span style="font-size:10px;color:var(--amber-fg)">${p.chance!=null?p.chance+'%':''}</span>
-            ${p.news ? `<span style="font-size:10px;color:var(--text3);max-width:120px;text-align:right">${p.news.slice(0,40)}${p.news.length>40?'…':''}</span>` : ''}
-          </div>`).join("")}
-      </div>
-    </div>` : "";
-
-  // Squad stats card
-  const totalComp = starters.reduce((s,p)=>s+p.composite,0);
-  const avgForm   = (starters.reduce((s,p)=>s+(p.form||0),0)/starters.length).toFixed(1);
-  const sideStatsCard = `
-    <div class="tsp-card">
-      <div class="tsp-title">Squad stats</div>
-      <div class="tsp-card-body">
-        <div class="tsp-stat-grid">
-          <div class="tsp-stat-row"><span style="color:var(--text3)">Formation</span><strong>${currentForm}</strong></div>
-          <div class="tsp-stat-row"><span style="color:var(--text3)">Total score</span><strong>${totalComp}</strong></div>
-          <div class="tsp-stat-row"><span style="color:var(--text3)">Avg form</span><strong>${avgForm}</strong></div>
-          <div class="tsp-stat-row"><span style="color:var(--text3)">Squad value</span><strong>£${(meta.squad_value||0).toFixed(1)}m</strong></div>
-          <div class="tsp-stat-row"><span style="color:var(--text3)">Bank</span><strong>£${(meta.bank||0).toFixed(1)}m</strong></div>
-        </div>
-      </div>
-    </div>`;
+  _my.cap = capCandidates;
+  _my.sim = {};
 
   el("tab-myteam").innerHTML = `
-    ${buildGwDecisionBanner(_state, meta)}
-    ${dgwCard}
     ${formBanner}
     <div class="myteam-layout">
       <div class="myteam-left">
-        <div style="text-align:center;margin-bottom:6px">
-          <span style="background:rgba(0,0,0,.6);color:#fff;font-size:10px;font-weight:700;
-            padding:2px 10px;border-radius:0;letter-spacing:.5px">${currentForm}</span>
-        </div>
-        <div class="pitch">
-          ${pitchRow(fwds,"FORWARDS")}
-          ${pitchRow(mids,"MIDFIELDERS")}
-          ${pitchRow(defs,"DEFENDERS")}
-          ${pitchRow(gkp,"GOALKEEPER")}
-        </div>
-        <div class="bench-strip">
-          <div class="bench-strip-label">Bench</div>
-          ${subs.map(p=>playerCard(p,true)).join("")}
-        </div>
+        <div id="lensHost"></div>
+        <div id="simHost"></div>
+        <div id="pitchHost"></div>
         ${benchBanner}
       </div>
       <div class="myteam-right">
         <div class="team-side-panel">
-          ${sideCapCard}
-          ${sideTransferCard}
-          ${sideInjCard}
-          ${sideStatsCard}
+          <div class="tsp-card" id="inboxHost"></div>
+          <div class="tsp-card" id="sqStatsHost"></div>
         </div>
       </div>
-    </div>`;
+    </div>
+    <div class="sc-head">Scout report</div>
+    <div class="sc-grid" id="scoutHost"></div>`;
+  refreshMyTeamDynamic();
+  refreshInbox();
+  refreshScout();
 }
 
 function jumpToPlayer(pid, name) {
@@ -1239,7 +1133,7 @@ function renderGroup(g) {
     return `<div class="t-opt">
       <div style="flex:1;min-width:130px">
         <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:3px">
-          <span class="t-in-name">${inp.name}</span>${inDGW}${inInj}
+          <span class="t-in-name">${inp.name}</span>${flagTagById(inp.id)}${inDGW}${inInj}
           ${wlStarBtn(inp)}
           ${badge(vCls, opt.verdict)}
           <span style="font-size:12px;font-weight:700;color:var(--text2)">+${opt.gain}</span>
@@ -1265,6 +1159,7 @@ function renderGroup(g) {
         <div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
           ${costHtml}${bankNote}
         </div>
+        <button class="sim-btn" style="margin-top:6px" data-sim="${out.id}:${inp.id}">▶ Simulate on pitch</button>
         <div style="font-size:11px;color:${fdrC};margin-top:4px">Next: ${opt.next_fix}</div>
       </div>
     </div>`;
@@ -1275,7 +1170,7 @@ function renderGroup(g) {
       <div style="flex:1">
         <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">
           Transfer out · ${out.pos}</div>
-        <div class="t-out-name" data-pid="${out.id}" style="cursor:pointer">${out.name} ${outDGW}${outInj}</div>
+        <div class="t-out-name" data-pid="${out.id}" style="cursor:pointer">${out.name} ${flagTagById(out.id)}${outDGW}${outInj}</div>
         <div class="t-out-meta">${out.team_name} · £${out.price}m · Form ${out.form} · wFDR ${out.wfdr}</div>
         <div class="fdr-row" style="justify-content:flex-start;margin-top:6px">${fdrSq(g.out_fixes,5)}</div>
       </div>
@@ -1503,8 +1398,7 @@ function drawRankTable(players) {
       if (!p.xgi90) return `<td><span style="color:var(--text3);font-size:11px">—</span></td>`;
       const pct = Math.min(p.xgi90/1.5*100,100);
       const c   = p.xgi90>=0.6?"#1a8a26":p.xgi90>=0.3?"#9c7a00":"#a3182a";
-      const flag = p.xg_overperf>=3?` ${badge("amber","↓ regress?")}`:
-                   p.xg_overperf<=-3?` ${badge("green","↑ due goals")}`:"";
+      const flag = flagTag(p) ? " " + flagTag(p) : "";
       return `<td>
         <div style="display:flex;align-items:center;gap:5px">
           <div style="height:5px;border-radius:0;background:var(--border2);width:46px;overflow:hidden">
@@ -4661,7 +4555,7 @@ function buildProfileCard(p) {
       :p.has_dgw_next?`<span style="background:rgba(124,99,255,0.12);color:var(--purple-fg);padding:2px 6px;border-radius:0;font-size:10px;font-weight:700">DGW GW${p.dgw_next_gw}</span>`:"",
     p.price_rising?`<span style="background:var(--green-bg);color:var(--green-fg);padding:2px 6px;border-radius:0;font-size:10px;font-weight:700">↑ Rising</span>`:"",
     p.price_falling?`<span style="background:var(--red-bg);color:var(--red-fg);padding:2px 6px;border-radius:0;font-size:10px;font-weight:700">↓ Falling</span>`:"",
-    (p.xg_overperf||0)>=3?`<span style="background:var(--amber-bg);color:var(--amber-fg);padding:2px 6px;border-radius:0;font-size:10px;font-weight:700">⚠ Regress?</span>`:"",
+    flagTag(p),
     p.rotation_risk?`<span style="background:var(--amber-bg);color:var(--amber-fg);padding:2px 6px;border-radius:0;font-size:10px;font-weight:700">ROT</span>`:"",
   ].filter(Boolean).join(" ");
 
@@ -4730,6 +4624,8 @@ function buildProfileCard(p) {
     </div>
 
     ${buildAttributeGrid(p)}
+    ${flagProfileHtml(p)}
+    ${trendProfileHtml(p)}
 
     ${statSection}
 
@@ -5155,3 +5051,575 @@ function quickLoadTeam(id) {
 
 
 
+
+
+// ═══════════════════════════════════════════════════════════════════════
+// Flags · Pitch lenses · Transfer simulator · Scout report · Inbox
+// All numbers shown are real FPL API fields; "points owed" is a labelled
+// calculation (formula in tooltip) using official scoring values.
+// ═══════════════════════════════════════════════════════════════════════
+
+const FLAG_FORMULA = "Points owed = (xG − goals) × goal pts + (xA − assists) × 3, "
+  + "plus (goals conceded − xGC) × 0.5 for GKP/DEF. Goal pts: GKP 10 · DEF 6 · MID 5 · FWD 4. "
+  + "A signal, not a prediction.";
+
+const _my = { lens: "form", sim: {}, cap: [], scout: { due: "ALL", hot: "ALL" } };
+
+function flagTier(p) { return (p && p.flag && p.flag.tier) || null; }
+
+function flagLine(p) {
+  const f = p.flag;
+  if (!f) return "";
+  if (p.pos === "GKP") return `GC ${f.gc} · xGC ${f.xgc.toFixed(1)}`;
+  return `xGI ${f.xgi.toFixed(1)} · GI ${f.gi}`;
+}
+
+function owedStr(f) { return (f.owed > 0 ? "+" : "") + f.owed.toFixed(1); }
+
+function flagTip(p) {
+  const f = p.flag;
+  if (!f) return "";
+  const lead = f.tier && f.tier.startsWith("DUE") ? "Underperforming its numbers — returns may be due"
+             : f.tier && f.tier.startsWith("HOT") ? "Outperforming its numbers — may cool"
+             : "";
+  return `${lead}\n${flagLine(p)} · ≈${owedStr(f)} pts owed `
+       + `(rank ${f.owed_rank || "—"} of ${f.pool_n || "—"} ${p.pos}, ${f.minutes} mins)\n${FLAG_FORMULA}`;
+}
+
+function flagTag(p) {
+  const t = flagTier(p);
+  if (!t) return "";
+  const cls = t.startsWith("DUE") ? "ftag-due" : "ftag-hot";
+  const strong = t.endsWith("+") ? " ftag-strong" : "";
+  return `<span class="ftag ${cls}${strong}" title="${flagTip(p).replace(/"/g, "&quot;")}">${t}</span>`;
+}
+
+// ── Pitch lenses ─────────────────────────────────────────────────────
+const LENSES = [
+  ["form",    "Form"],
+  ["owed",    "Pts owed"],
+  ["fixture", "Fixture"],
+  ["minutes", "Minutes"],
+  ["price",   "Price"],
+  ["trend",   "Last 5"],
+];
+
+function lensBlock(p, lens) {
+  const tLbl = p.form_trend_label || "→";
+  const tC   = tLbl.startsWith("↑") ? "#1a8a26" : tLbl.startsWith("↓") ? "#a3182a" : "var(--text3)";
+  if (lens === "owed") {
+    const f = p.flag;
+    if (!f || !f.eligible) {
+      return `<div class="pform" style="color:var(--text3)">—</div><div class="pform-lbl">${p.minutes < 450 ? "<450 mins" : "not eligible"}</div>`;
+    }
+    const c = f.owed >= 2 ? "var(--green-fg)" : f.owed <= -2 ? "var(--amber-fg)" : "var(--text)";
+    return `<div class="pform" style="color:${c}">${owedStr(f)}</div><div class="pform-lbl">${flagLine(p)}</div>`;
+  }
+  if (lens === "fixture") {
+    const f1 = p.fixes?.[0];
+    if (!f1) return `<div class="pform" style="color:var(--text3)">—</div><div class="pform-lbl">no fixture</div>`;
+    const n = (p.fixes || []).filter(x => x.gw === f1.gw).length;
+    return `<div class="pform" style="color:${FDR_C[f1.fdr] || "#888"}">${f1.opp}${n > 1 ? " ×2" : ""}</div>
+            <div class="pform-lbl">${f1.home ? "Home" : "Away"} · FDR ${f1.fdr}</div>`;
+  }
+  if (lens === "minutes") {
+    const mps = Math.round(p.mins_per_start || 0);
+    const c = mps >= 80 ? "var(--green-fg)" : mps >= 60 ? "var(--text)" : "var(--red-fg)";
+    return `<div class="pform" style="color:${c}">${mps}'</div><div class="pform-lbl">${p.starts} starts · ${p.minutes}m</div>`;
+  }
+  if (lens === "price") {
+    const nt = p.net_transfers || 0;
+    const k = Math.abs(nt) >= 1000 ? (nt / 1000).toFixed(0) + "k" : nt;
+    const c = nt > 0 ? "var(--green-fg)" : nt < 0 ? "var(--red-fg)" : "var(--text)";
+    return `<div class="pform">£${p.price}</div><div class="pform-lbl" style="color:${c}">${nt > 0 ? "+" : ""}${k} net</div>`;
+  }
+  if (lens === "trend") {
+    const t = trendOf(p);
+    if (!t || t.l5_xgi90 == null) return `<div class="pform" style="color:var(--text3)">—</div><div class="pform-lbl">${t ? "low minutes" : "loading…"}</div>`;
+    const c = t.xgi_dir === "up" ? "var(--green-fg)" : t.xgi_dir === "down" ? "var(--red-fg)" : "var(--text)";
+    return `<div class="pform" style="color:${c}">${t.l5_xgi90.toFixed(2)}</div><div class="pform-lbl">xGI/90 · szn ${t.season_xgi90 ?? "—"} · ${t.l5_avg_min}'</div>`;
+  }
+  const trendEl = (p.starts >= 5 && tLbl !== "→")
+    ? `<span style="font-size:10px;color:${tC};margin-left:3px">${tLbl}</span>` : "";
+  return `<div class="pform">${p.form}${trendEl}</div><div class="pform-lbl">form</div>`;
+}
+
+function playerCard(p, dim = false) {
+  const fix1  = p.fixes?.[0];
+  const fdrC  = fix1 ? FDR_C[fix1.fdr] || "#888" : "#888";
+  const nFix  = fix1 ? `${fix1.opp} (${fix1.home ? "H" : "A"})` : "TBC";
+  const cap   = p.multiplier === 2 ? `<div class="cap-dot">C</div>` : p.multiplier === 3 ? `<div class="cap-dot tc">TC</div>` : "";
+  const inj   = p.news ? `<div class="inj-dot" title="${(p.news || "").replace(/"/g, "&quot;")}">⚠️</div>` : "";
+  const pArr  = p.price_rising ? `<div class="price-badge">↑</div>` : p.price_falling ? `<div class="price-badge" style="color:var(--red-fg)">↓</div>` : "";
+  const rotEl = p.rotation_risk
+    ? `<div style="font-size:9px;color:var(--amber);margin-top:1px" title="${p.rotation_risk_label || ""}">🔄 rotation risk</div>` : "";
+  const tr = (typeof trendTag === "function") ? trendTag(p) : "";
+
+  return `<div class="pcard${dim ? " dim" : ""}${p._sim ? " sim-in" : ""}" data-pid="${p.id}" style="cursor:pointer">
+    ${cap}${inj}${pArr}
+    <img src="${p.shirt}" onerror="this.style.display='none'" alt="">
+    <div class="pname">${p.name}</div>
+    <div class="pteam">${p.team_name} · £${p.price}m</div>
+    ${lensBlock(p, _my.lens)}
+    <div class="fdr-row">${fdrSq(p.fixes, 3)}</div>
+    <div style="font-size:9px;color:${fdrC};margin-top:2px">${nFix}</div>
+    ${dgwBadge(p)}
+    <div class="ftag-row">${flagTag(p)}${tr}</div>
+    ${p.availability < 1 && p.availability > 0 ? `<div style="font-size:9px;color:var(--amber);margin-top:1px">${Math.round(p.availability * 100)}% avail.</div>` : ""}
+    ${rotEl}
+  </div>`;
+}
+
+// ── Simulator ────────────────────────────────────────────────────────
+function simSquad() {
+  const base = _state.squad || [];
+  const full = new Map((_state.all_players || []).map(p => [p.id, p]));
+  return base.map(o => {
+    const inId = _my.sim[o.id];
+    if (!inId) return o;
+    const ip = full.get(inId);
+    if (!ip) return o;
+    return { ...ip, multiplier: o.multiplier, is_sub: o.is_sub, pick_pos: o.pick_pos, _sim: true, _replaces: o };
+  });
+}
+
+function simulateMove(outId, inId) {
+  if (!_state) return;
+  const squadNow = simSquad();
+  const slotKey = Object.keys(_my.sim).find(k => _my.sim[k] === outId) ?? outId;
+  const key = parseInt(slotKey);
+  if (!(_state.squad || []).some(p => p.id === key)) return;
+  if (squadNow.some(p => p.id === inId)) return;
+  if (inId === key) delete _my.sim[key]; else _my.sim[key] = inId;
+  refreshMyTeamDynamic();
+  goToTab("myteam");
+}
+function simUndo() {
+  const keys = Object.keys(_my.sim);
+  if (keys.length) delete _my.sim[keys[keys.length - 1]];
+  refreshMyTeamDynamic();
+}
+function simReset() { _my.sim = {}; refreshMyTeamDynamic(); }
+
+function xPts(sq, i) {
+  return sq.filter(p => !p.is_sub)
+           .reduce((s, p) => s + ((p.projections || [])[i]?.proj || 0) * (p.multiplier || 1), 0);
+}
+
+function simBannerHtml() {
+  const moves = Object.keys(_my.sim).length;
+  if (!moves) return "";
+  const m = _state.meta, sq = simSquad(), orig = _state.squad;
+  const delta = sq.reduce((s, p) => s + (p._replaces ? p.price - p._replaces.price : 0), 0);
+  const bankAfter = m.bank - delta;
+  const hit = Math.max(0, moves - (m.free_transfers || 0)) * 4;
+  const counts = {};
+  sq.forEach(p => counts[p.team_name] = (counts[p.team_name] || 0) + 1);
+  const over = Object.entries(counts).filter(([, n]) => n > 3).map(([t]) => t);
+  const b1 = xPts(orig, 0), a1 = xPts(sq, 0);
+  const b3 = [0, 1, 2].reduce((s, i) => s + xPts(orig, i), 0);
+  const a3 = [0, 1, 2].reduce((s, i) => s + xPts(sq, i), 0);
+  const warn = [];
+  if (bankAfter < -0.001) warn.push(`Over budget by £${(-bankAfter).toFixed(1)}m`);
+  if (over.length) warn.push(`More than 3 players from ${over.join(", ")}`);
+  const sg = v => (v >= 0 ? "+" : "") + v.toFixed(1);
+  return `<div class="sim-banner">
+    <div class="sim-head"><b>Transfer simulator</b> · ${moves} move${moves > 1 ? "s" : ""}
+      <span class="sim-actions"><button class="sim-btn" onclick="simUndo()">Undo</button><button class="sim-btn" onclick="simReset()">Reset</button></span></div>
+    <div class="sim-grid">
+      <div><span>Cost</span><b>${delta >= 0 ? "−" : "+"}£${Math.abs(delta).toFixed(1)}m</b></div>
+      <div><span>Bank after</span><b style="color:${bankAfter < 0 ? "var(--red-fg)" : "inherit"}">£${bankAfter.toFixed(1)}m</b></div>
+      <div><span>Hit</span><b style="color:${hit ? "var(--red-fg)" : "var(--green-fg)"}">${hit ? "−" + hit + " pts" : "free"}</b></div>
+      <div><span>Next GW xPts</span><b>${b1.toFixed(1)} → ${a1.toFixed(1)} <em>${sg(a1 - b1)}</em></b></div>
+      <div><span>Next 3 GWs</span><b>${b3.toFixed(0)} → ${a3.toFixed(0)} <em>${sg(a3 - b3 - hit)} net</em></b></div>
+    </div>
+    ${warn.length ? `<div class="sim-warn">⚠ ${warn.join(" · ")}</div>` : ""}
+    <div class="sim-note">xPts are the model's projections, not API values.</div>
+  </div>`;
+}
+
+// ── Pitch / dynamic region ───────────────────────────────────────────
+function pitchHtml(squad) {
+  const starters = squad.filter(p => !p.is_sub).sort((a, b) => a.pick_pos - b.pick_pos);
+  const subs     = squad.filter(p => p.is_sub).sort((a, b) => a.pick_pos - b.pick_pos);
+  const by = pos => starters.filter(p => p.pos === pos);
+  const cur = `${by("DEF").length}-${by("MID").length}-${by("FWD").length}`;
+  return `<div style="text-align:center;margin-bottom:6px">
+      <span style="background:rgba(0,0,0,.6);color:#fff;font-size:10px;font-weight:700;padding:2px 10px;letter-spacing:.5px">${cur}</span>
+    </div>
+    <div class="pitch">
+      ${pitchRow(by("FWD"), "FORWARDS")}${pitchRow(by("MID"), "MIDFIELDERS")}
+      ${pitchRow(by("DEF"), "DEFENDERS")}${pitchRow(by("GKP"), "GOALKEEPER")}
+    </div>
+    <div class="bench-strip"><div class="bench-strip-label">Bench</div>${subs.map(p => playerCard(p, true)).join("")}</div>`;
+}
+
+function squadStatsHtml(squad) {
+  const m = _state.meta;
+  const st = squad.filter(p => !p.is_sub);
+  const by = pos => st.filter(p => p.pos === pos).length;
+  const avgForm = st.length ? (st.reduce((s, p) => s + (p.form || 0), 0) / st.length).toFixed(1) : "—";
+  const delta = squad.reduce((s, p) => s + (p._replaces ? p.price - p._replaces.price : 0), 0);
+  const val = (m.squad_value || 0) + delta * 0; // selling prices differ from now-prices; keep API value
+  const due = squad.filter(p => (flagTier(p) || "").startsWith("DUE")).length;
+  const hot = squad.filter(p => (flagTier(p) || "").startsWith("HOT")).length;
+  const row = (a, b) => `<div class="tsp-stat-row"><span style="color:var(--text3)">${a}</span><strong>${b}</strong></div>`;
+  return `<div class="tsp-title">Squad stats</div><div class="tsp-card-body"><div class="tsp-stat-grid">
+    ${row("Formation", `${by("DEF")}-${by("MID")}-${by("FWD")}`)}
+    ${row("Avg form", avgForm)}
+    ${row("Squad value", "£" + val.toFixed(1) + "m")}
+    ${row("Bank", "£" + ((m.bank || 0) - delta).toFixed(1) + "m")}
+    ${row("DUE players", due)}
+    ${row("HOT players", hot)}
+  </div></div>`;
+}
+
+function lensBarHtml() {
+  return `<div class="lens-bar"><span class="lens-lbl">Lens</span>${
+    LENSES.map(([k, l]) => `<button class="lens-btn${_my.lens === k ? " on" : ""}" data-lens="${k}">${l}</button>`).join("")
+  }</div>`;
+}
+
+function refreshMyTeamDynamic() {
+  if (!_state || !el("pitchHost")) return;
+  const sq = simSquad();
+  el("simHost").innerHTML = simBannerHtml();
+  el("lensHost").innerHTML = lensBarHtml();
+  el("pitchHost").innerHTML = pitchHtml(sq);
+  el("sqStatsHost").innerHTML = squadStatsHtml(sq);
+}
+
+// ── Navigation helper ────────────────────────────────────────────────
+function goToTab(id) {
+  const groups = window._TAB_GROUPS || [];
+  for (const g of groups) {
+    if (g.tabs.find(([tid]) => tid === id)) {
+      const gBtn = document.querySelector(`.tab-group-btn[data-gkey="${g.key}"]`);
+      if (gBtn) switchTabGroup(g.key, gBtn);
+      renderSubTabs(g.tabs, id);
+      switchTab(id);
+      return;
+    }
+  }
+}
+
+// ── Scout report (3 × 2 grid) ────────────────────────────────────────
+function scPanel(title, bodyHtml, tabsHtml = "", cls = "") {
+  return `<div class="sc-panel ${cls}"><div class="tsp-title sc-title"><span>${title}</span>${tabsHtml}</div><div class="sc-body">${bodyHtml}</div></div>`;
+}
+function scRow(p, right, sub, attrs) {
+  const own = new Set((_state.squad || []).map(x => x.id)).has(p.id);
+  return `<div class="sc-row${own ? " own" : ""}" ${attrs || `data-pid="${p.id}"`}>
+    <div class="sc-l"><div class="sc-name">${p.name}${own ? ' <span class="sc-own" title="In your squad">●</span>' : ""} ${flagTag(p)}</div>
+      <div class="sc-sub">${p.team_name} · ${p.pos} · £${p.price}m</div></div>
+    <div class="sc-r"><div class="sc-main">${right}</div><div class="sc-sub">${sub}</div></div>
+  </div>`;
+}
+function scTabs(key) {
+  return `<span class="sc-tabs">${["ALL", "DEF", "MID", "FWD"].map(t =>
+    `<button class="sc-tab${_my.scout[key] === t ? " on" : ""}" data-sctab="${key}:${t}">${t}</button>`).join("")}</span>`;
+}
+const SC_EMPTY = `<div class="sc-empty">No eligible players yet (needs 450+ mins and 5+ starts).</div>`;
+
+function scoutDueHtml() {
+  const t = _my.scout.due;
+  const list = (_state.all_players || [])
+    .filter(p => (flagTier(p) || "").startsWith("DUE") && (t === "ALL" || p.pos === t))
+    .sort((a, b) => b.flag.owed - a.flag.owed).slice(0, 5);
+  return list.length ? list.map(p => scRow(p, `${owedStr(p.flag)} pts`, flagLine(p))).join("") : SC_EMPTY;
+}
+function scoutHotHtml() {
+  const t = _my.scout.hot;
+  const own = new Set((_state.squad || []).map(x => x.id));
+  const list = (_state.all_players || [])
+    .filter(p => (flagTier(p) || "").startsWith("HOT") && (t === "ALL" || p.pos === t))
+    .sort((a, b) => (own.has(b.id) - own.has(a.id)) || (a.flag.owed - b.flag.owed)).slice(0, 5);
+  return list.length ? list.map(p => scRow(p, `${owedStr(p.flag)} pts`, flagLine(p))).join("") : SC_EMPTY;
+}
+function scoutCaptainHtml() {
+  const list = (_my.cap || []).slice(0, 5);
+  if (!list.length) return SC_EMPTY;
+  return list.map(p => {
+    const f = p.fixes?.[0];
+    return scRow(p, `form ${p.form}`, `${p.xgi90 ? "xGI/90 " + p.xgi90.toFixed(2) : "—"} · ${f ? `${f.opp} (${f.home ? "H" : "A"}) FDR ${f.fdr}` : "TBC"}`);
+  }).join("");
+}
+function scoutSwingsHtml() {
+  const opts = (_state.transfers || []).flatMap(g => g.options.map(o => ({ ...o, out: g.out })));
+  opts.sort((a, b) => (b.proj_gain3 ?? b.gain) - (a.proj_gain3 ?? a.gain));
+  const top = opts.slice(0, 5);
+  if (!top.length) return `<div class="sc-empty">No transfer suggestions.</div>`;
+  return top.map(o => `<div class="sc-row" data-sim="${o.out.id}:${o.in.id}" title="Click to simulate on the pitch">
+    <div class="sc-l"><div class="sc-name"><span class="sc-out">${o.out.name}</span> → ${o.in.name}</div>
+      <div class="sc-sub">${o.in.team_name} · £${o.in.price}m · form ${o.in.form}</div></div>
+    <div class="sc-r"><div class="sc-main">+${(o.proj_gain3 ?? 0).toFixed ? (o.proj_gain3 ?? 0).toFixed(1) : o.proj_gain3} pts</div><div class="sc-sub">proj. 3 GWs · ${o.uses_free ? "free" : "−" + (o.hit_cost || 4)}</div></div>
+  </div>`).join("");
+}
+function scoutDiffHtml() {
+  const list = (_state.all_players || [])
+    .filter(p => p.ownership < 10 && p.starts >= 5 && p.status === "a" && p.xgi90 > 0 && (p.chance == null || p.chance >= 75))
+    .sort((a, b) => b.xgi90 - a.xgi90).slice(0, 5);
+  if (!list.length) return SC_EMPTY;
+  return list.map(p => scRow(p, `xGI/90 ${p.xgi90.toFixed(2)}`, `${p.ownership.toFixed(1)}% owned · form ${p.form}`)).join("");
+}
+function scoutSwingHtml() {
+  const mine = _state.squad || [];
+  const rows = (_state.fixtures || []).map(t => {
+    const fx = (t.fixes || []).slice().sort((a, b) => a.gw - b.gw);
+    if (fx.length < 6) return null;
+    const avg = a => a.reduce((s, f) => s + f.fdr, 0) / a.length;
+    const a = avg(fx.slice(0, 3)), b = avg(fx.slice(3, 6));
+    return { t, fx, a, b, d: a - b };
+  }).filter(Boolean);
+  const imp = rows.slice().sort((x, y) => y.d - x.d).slice(0, 3);
+  const wor = rows.slice().sort((x, y) => x.d - y.d).slice(0, 2);
+  const line = (r, tag) => {
+    const yours = mine.filter(p => p.team_name === r.t.team).map(p => p.name);
+    return `<div class="sc-row" style="cursor:default"><div class="sc-l"><div class="sc-name">${r.t.team} <span class="ftag ${tag === "buy" ? "ftag-due" : "ftag-hot"}">${tag === "buy" ? "IMPROVING" : "WORSENING"}</span></div>
+      <div class="sc-sub">${yours.length ? "Yours: " + yours.join(", ") : "None of yours"}</div></div>
+      <div class="sc-r"><div class="fdr-row" style="justify-content:flex-end">${fdrSq(r.fx, 6)}</div>
+      <div class="sc-sub">FDR avg ${r.a.toFixed(1)} → ${r.b.toFixed(1)}</div></div></div>`;
+  };
+  if (!rows.length) return SC_EMPTY;
+  return imp.map(r => line(r, "buy")).join("") + wor.map(r => line(r, "sell")).join("");
+}
+
+function scoutGridHtml() {
+  return [
+    scPanel("Due a return", scoutDueHtml(), scTabs("due")),
+    scPanel("Running hot", scoutHotHtml(), scTabs("hot")),
+    scPanel("Captain options", scoutCaptainHtml()),
+    scPanel("Best swings", scoutSwingsHtml()),
+    scPanel("Differentials · under 10%", scoutDiffHtml()),
+    scPanel("Fixture swing · next 3 → following 3", scoutSwingHtml()),
+  ].join("");
+}
+function refreshScout() { if (el("scoutHost")) el("scoutHost").innerHTML = scoutGridHtml(); }
+
+// ── Manager's Inbox ──────────────────────────────────────────────────
+function inboxReadGet() { try { return new Set(JSON.parse(localStorage.getItem("fpl_inbox_read") || "[]")); } catch (e) { return new Set(); } }
+function inboxReadAdd(id) { try { const s = inboxReadGet(); s.add(id); localStorage.setItem("fpl_inbox_read", JSON.stringify([...s].slice(-300))); } catch (e) {} }
+
+function buildInboxItems() {
+  const m = _state.meta, sq = _state.squad || [], gw = m.current_gw, items = [];
+  const add = (sev, id, subject, line, attrs) => items.push({ sev, id: `gw${gw}:${id}`, subject, line, attrs: attrs || "" });
+
+  if (m.deadline_time) {
+    const ms = new Date(m.deadline_time) - new Date();
+    if (ms > 0) {
+      const h = Math.floor(ms / 3600000), mi = Math.floor((ms % 3600000) / 60000);
+      const s = h > 24 ? `${Math.floor(h / 24)}d ${h % 24}h` : h > 0 ? `${h}h ${mi}m` : `${mi}m`;
+      add(h < 12 ? 0 : h < 36 ? 1 : 3, "deadline", `GW${gw} deadline in ${s}`,
+          `${m.free_transfers} free transfer${m.free_transfers === 1 ? "" : "s"} · bank £${m.bank.toFixed(1)}m${m.active_chip ? " · chip: " + m.active_chip : ""}`);
+    }
+  }
+  sq.filter(p => p.news || (p.chance != null && p.chance < 100)).forEach(p => {
+    const c = p.chance;
+    add(c != null && c <= 25 ? 0 : 1, "inj" + p.id, `${p.name} — ${c != null ? c + "% chance" : "news"}${p.is_sub ? " (bench)" : ""}`,
+        (p.news || "").slice(0, 80), `data-pid="${p.id}"`);
+  });
+  sq.forEach(p => {
+    const t = flagTier(p);
+    if (!t) return;
+    add(t.startsWith("DUE") ? 2 : 1, "flag" + p.id,
+        `${p.name} flagged ${t}`, `${flagLine(p)} · ≈${owedStr(p.flag)} pts owed`, `data-pid="${p.id}"`);
+  });
+  sq.filter(p => p.price_rising || p.price_falling).forEach(p => {
+    add(3, "px" + p.id, `${p.name} price ${p.price_rising ? "rise" : "fall"} likely`,
+        `net transfers ${p.net_transfers > 0 ? "+" : ""}${p.net_transfers} · now £${p.price}m`, `data-pid="${p.id}"`);
+  });
+  Object.entries(_state.dgw_summary || {}).forEach(([g, teams]) => {
+    const n = parseInt(g) - gw;
+    if (!teams.length || n < 0 || n > 5 || parseInt(g) > 38) return;
+    const mine = sq.filter(p => !p.is_sub && teams.includes(p.team_name)).map(p => p.name);
+    add(n <= 1 ? 1 : 3, "dgw" + g, `GW${g} double gameweek`, `${teams.join(", ")}${mine.length ? " · yours: " + mine.join(", ") : ""}`);
+  });
+  (_state.bgw_gws || []).forEach(g => {
+    const n = g - gw;
+    if (n < 0 || n > 5 || g > 38) return;
+    const mine = sq.filter(p => !p.is_sub && !(p.fixes || []).some(f => f.gw === g)).map(p => p.name);
+    add(n <= 1 ? 1 : 3, "bgw" + g, `GW${g} blank gameweek`, mine.length ? "Blanking: " + mine.join(", ") : "None of your starters");
+  });
+  if (typeof trendInboxItems === "function") trendInboxItems(add);
+  const cap = (_my.cap || [])[0];
+  if (cap) {
+    const f = cap.fixes?.[0];
+    add(2, "cap", `Captain pick: ${cap.name}`,
+        `${cap.xgi90 ? "xGI/90 " + cap.xgi90.toFixed(2) + " · " : ""}form ${cap.form}${f ? ` · ${f.opp} (${f.home ? "H" : "A"}) FDR ${f.fdr}` : ""}`, `data-pid="${cap.id}"`);
+  }
+  const opts = (_state.transfers || []).flatMap(g => g.options.map(o => ({ ...o, out: g.out })));
+  opts.sort((a, b) => (b.proj_gain3 ?? 0) - (a.proj_gain3 ?? 0));
+  if (opts[0]) {
+    const o = opts[0];
+    add(2, "swap", `Top swing: ${o.out.name} → ${o.in.name}`,
+        `+${(o.proj_gain3 ?? 0).toFixed(1)} pts proj. over 3 GWs · click to simulate`, `data-sim="${o.out.id}:${o.in.id}"`);
+  }
+  items.sort((a, b) => a.sev - b.sev);
+  return items;
+}
+
+function inboxHtml() {
+  const read = inboxReadGet(), items = buildInboxItems();
+  const col = ["#c1272d", "#d98a00", "#1a8a26", "#2d5da8"];
+  const unread = items.filter(i => !read.has(i.id)).length;
+  const rows = items.map(i => `<div class="ib-row${read.has(i.id) ? "" : " unread"}" data-inbox="${i.id}" ${i.attrs}>
+    <span class="ib-sq" style="background:${col[i.sev]}"></span>
+    <div class="ib-txt"><div class="ib-subj">${i.subject}</div><div class="ib-line">${i.line}</div></div></div>`).join("");
+  return `<div class="tsp-title">Manager's inbox · GW${_state.meta.current_gw}<span style="float:right;opacity:.8">${unread} new</span></div>
+    <div class="ib-list">${rows || '<div class="sc-empty">Nothing to report.</div>'}</div>`;
+}
+function refreshInbox() { if (el("inboxHost")) el("inboxHost").innerHTML = inboxHtml(); }
+
+// ── Delegated handlers ───────────────────────────────────────────────
+document.addEventListener("click", function (e) {
+  const lens = e.target.closest("[data-lens]");
+  if (lens) { _my.lens = lens.dataset.lens; refreshMyTeamDynamic(); return; }
+  const sct = e.target.closest("[data-sctab]");
+  if (sct) { const [k, t] = sct.dataset.sctab.split(":"); _my.scout[k] = t; refreshScout(); return; }
+  const sim = e.target.closest("[data-sim]");
+  if (sim) { e.stopPropagation(); const [o, i] = sim.dataset.sim.split(":").map(Number); simulateMove(o, i); return; }
+  const ib = e.target.closest("[data-inbox]");
+  if (ib) { inboxReadAdd(ib.dataset.inbox); ib.classList.remove("unread"); }
+}, false);
+
+function flagTagById(id) {
+  const p = (_state?.all_players || []).find(x => x.id === id) || (_state?.squad || []).find(x => x.id === id);
+  return p ? flagTag(p) : "";
+}
+
+// Profile: points-owed breakdown (real inputs, labelled calculation)
+function flagProfileHtml(p) {
+  const f = p.flag;
+  if (!f) return "";
+  const gk = p.pos === "GKP";
+  const row = (a, b) => `<div class="cm-attr-row"><span class="cm-attr-label">${a}</span><span class="cm-attr-val">${b}</span></div>`;
+  const rows = gk
+    ? row("Goals conceded", f.gc) + row("xG conceded", f.xgc.toFixed(2)) + row("Gap pts (×0.5)", owedStr({owed: f.owed_def}))
+    : row("xG / goals", `${f.xg.toFixed(2)} / ${f.goals}`) + row("xA / assists", `${f.xa.toFixed(2)} / ${f.assists}`)
+      + row("Attacking owed", owedStr({owed: f.owed_att}))
+      + (p.pos === "DEF" ? row("Conceded gap", owedStr({owed: f.owed_def})) : "");
+  return `<div style="margin:10px 0 4px;border:1px solid var(--border);padding:8px 10px" title="${FLAG_FORMULA.replace(/"/g, "&quot;")}">
+    <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">
+      Points owed ${flagTag(p)} <span style="float:right">${f.eligible ? owedStr(f) + " pts" : "not eligible (450+ mins, 5+ starts, fit)"}</span></div>
+    ${rows}
+    <div style="font-size:9px;color:var(--text3);margin-top:4px">Signal, not a prediction · ${f.minutes} mins sample${f.pool_n ? ` · rank ${f.owed_rank}/${f.pool_n} ${p.pos}` : ""}</div>
+  </div>`;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Rolling trends (last 5 GWs vs season) — real per-GW history, loaded after
+// the page renders so nothing blocks.
+// ═══════════════════════════════════════════════════════════════════════
+let _trends = {};
+let _trendsLoading = false;
+
+function trendOf(p) { return _trends[String(p.id)] || null; }
+
+function trendTag(p) {
+  const t = trendOf(p);
+  if (!t) return "";
+  if (t.mins_drop) return `<span class="ftag ftag-hot" title="Last 5 GWs: avg ${t.l5_avg_min} mins vs ${t.season_avg_min} season">MINS ↓</span>`;
+  if (t.xgi_dir === "up") return `<span class="ftag ftag-due" title="xGI/90 last 5: ${t.l5_xgi90} vs season ${t.season_xgi90}">TREND ↑</span>`;
+  if (t.xgi_dir === "down") return `<span class="ftag ftag-hot" title="xGI/90 last 5: ${t.l5_xgi90} vs season ${t.season_xgi90}">TREND ↓</span>`;
+  return "";
+}
+
+function trendInboxItems(add) {
+  (_state.squad || []).forEach(p => {
+    const t = trendOf(p);
+    if (!t) return;
+    if (t.mins_drop)
+      add(1, "mins" + p.id, `${p.name} minutes dropping`,
+          `Last 5 GWs avg ${t.l5_avg_min} mins vs ${t.season_avg_min} this season`, `data-pid="${p.id}"`);
+    else if (t.xgi_dir)
+      add(t.xgi_dir === "up" ? 2 : 1, "trend" + p.id, `${p.name} xGI trending ${t.xgi_dir}`,
+          `xGI/90 last 5: ${t.l5_xgi90} vs season ${t.season_xgi90}`, `data-pid="${p.id}"`);
+  });
+}
+
+function sparkline(vals, w = 120, h = 28) {
+  if (!vals || !vals.length) return "";
+  const mx = Math.max(...vals, 1), bw = w / vals.length;
+  return `<svg width="${w}" height="${h}" style="display:block">${vals.map((v, i) => {
+    const bh = Math.max(1, (v / mx) * (h - 2));
+    return `<rect x="${(i * bw + 1).toFixed(1)}" y="${(h - bh).toFixed(1)}" width="${(bw - 2).toFixed(1)}" height="${bh.toFixed(1)}" fill="#2d5da8"><title>${v} pts</title></rect>`;
+  }).join("")}</svg>`;
+}
+
+function trendProfileHtml(p) {
+  const t = trendOf(p);
+  if (!t) return "";
+  const row = (a, b) => `<div class="cm-attr-row"><span class="cm-attr-label">${a}</span><span class="cm-attr-val">${b}</span></div>`;
+  return `<div style="margin:10px 0 4px;border:1px solid var(--border);padding:8px 10px">
+    <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Last 5 GWs vs season ${trendTag(p)}</div>
+    ${row("xGI/90 (last 5 / season)", `${t.l5_xgi90 ?? "—"} / ${t.season_xgi90 ?? "—"}`)}
+    ${row("Avg minutes (last 5 / season)", `${t.l5_avg_min} / ${t.season_avg_min}`)}
+    ${row("Minutes, last 5", t.l5_mins.join(" · "))}
+    <div style="margin-top:4px;font-size:9px;color:var(--text3)">Points, last ${t.pts8.length} GWs</div>${sparkline(t.pts8)}
+  </div>`;
+}
+
+async function loadTrends() {
+  if (!_state || _trendsLoading) return;
+  _trendsLoading = true;
+  try {
+    const own = new Set((_state.squad || []).map(p => p.id));
+    const targets = (_state.all_players || []).filter(p => !own.has(p.id) && p.starts >= 5 && p.status === "a")
+      .sort((a, b) => b.composite - a.composite).slice(0, 40).map(p => p.id);
+    const due = (_state.all_players || []).filter(p => flagTier(p) && !own.has(p.id) && !targets.includes(p.id))
+      .sort((a, b) => Math.abs(b.flag.owed) - Math.abs(a.flag.owed)).slice(0, 20).map(p => p.id);
+    const ids = [...own, ...targets, ...due];
+    const res = await fetch("/api/trends", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids }) });
+    if (!res.ok) return;
+    _trends = (await res.json()).trends || {};
+    refreshMyTeamDynamic(); refreshInbox();
+  } catch (e) { /* trends are optional — fail soft */ }
+  finally { _trendsLoading = false; }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Flag scoreboard — replays past GWs: did DUE / HOT flags beat baseline?
+// ═══════════════════════════════════════════════════════════════════════
+let _sbTimer = null;
+
+function renderScoreboardShell() {
+  const host = el("tab-scoreboard");
+  if (!host) return;
+  host.innerHTML = `<div class="card" style="padding:12px">
+    <div style="font-size:13px;font-weight:800;margin-bottom:4px">Flag scoreboard</div>
+    <div style="font-size:11px;color:var(--text2);margin-bottom:8px">
+      Rebuilds every past gameweek's DUE / HOT flags from that GW's cumulative stats, then compares real points
+      over the next 3 GWs with the position average. Players with 450+ mins and 5+ starts at the time. Small samples — treat as evidence, not proof.</div>
+    <button class="sim-btn" onclick="startScoreboard()">Run scoreboard</button>
+    <div id="sbOut" style="margin-top:10px"></div></div>`;
+}
+
+async function startScoreboard() {
+  const out = el("sbOut");
+  out.innerHTML = `<div class="sc-empty">Calculating… this fetches each player's history once (can take a minute).</div>`;
+  clearInterval(_sbTimer);
+  const poll = async (start) => {
+    try {
+      const r = await (await fetch("/api/flag_scoreboard" + (start ? "?start=1" : ""))).json();
+      if (r.state === "running") out.innerHTML = `<div class="sc-empty">Calculating… ${r.done}/${r.total || "?"} players</div>`;
+      else if (r.state === "error") { clearInterval(_sbTimer); out.innerHTML = `<div class="err-box">${r.error}</div>`; }
+      else if (r.state === "done") { clearInterval(_sbTimer); out.innerHTML = scoreboardHtml(r.result); }
+    } catch (e) { clearInterval(_sbTimer); out.innerHTML = `<div class="err-box">${e.message}</div>`; }
+  };
+  await poll(true);
+  _sbTimer = setInterval(() => poll(false), 2500);
+}
+
+function scoreboardHtml(r) {
+  const order = ["DUE+", "DUE", "HOT", "HOT+"];
+  const rows = order.filter(t => r.tiers[t]).map(t => {
+    const x = r.tiers[t], diff = x.avg_after - x.avg_baseline;
+    const good = t.startsWith("DUE") ? diff > 0 : diff < 0;
+    return `<tr><td><span class="ftag ${t.startsWith("DUE") ? "ftag-due" : "ftag-hot"}${t.endsWith("+") ? " ftag-strong" : ""}">${t}</span></td><td>${x.n}</td>
+      <td>${x.avg_after.toFixed(2)}</td><td>${x.avg_baseline.toFixed(2)}</td>
+      <td style="color:${good ? "var(--green-fg)" : "var(--red-fg)"};font-weight:700">${diff > 0 ? "+" : ""}${diff.toFixed(2)}</td>
+      <td>${x.pct_beat}%</td></tr>`;
+  }).join("");
+  return `<table class="data-table"><thead><tr><th>Flag</th><th>Flags raised</th><th>Avg pts/GW after</th><th>Position avg</th><th>Difference</th><th>Beat avg</th></tr></thead><tbody>${rows || `<tr><td colspan="6">No flags raised in the window.</td></tr>`}</tbody></table>
+    <div style="font-size:10px;color:var(--text3);margin-top:6px">GW${r.gws[0]}–GW${r.gws[1]} · next ${r.window} GWs · ${r.players} players. DUE is "working" if difference is positive; HOT if negative.</div>`;
+}
