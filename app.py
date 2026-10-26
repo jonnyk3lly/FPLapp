@@ -1311,7 +1311,7 @@ def serialize_player(p):
         "price_rising","price_falling","net_transfers","price_change",
         "ownership","differential_score","opp_adj","form_trend","form_trend_label",
         "rotation_risk","rotation_risk_label","fixes",
-        "real_stats","flag",
+        "real_stats","flag","total_pts",
     ]}
     # Add 4-GW projections — used for DGW sort and planner
     if "projections" not in p:
