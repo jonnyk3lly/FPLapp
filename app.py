@@ -242,6 +242,94 @@ def _pct_class(pct, reverse=False):
         pct = 100 - pct
     return "hi" if pct >= 66 else ("mid" if pct >= 33 else "lo")
 
+# ---------------------------------------------------------------------------
+# DUE / HOT flags — position-weighted "points owed"
+# ---------------------------------------------------------------------------
+# Points owed = what the underlying numbers say a player should have scored
+# minus what they did, using the official FPL scoring values per position.
+# All inputs are real bootstrap-static fields. Thresholds live here so they
+# can be tuned in one place.
+FLAG_CFG = {
+    "min_minutes":  450,    # eligibility floor
+    "min_starts":   5,
+    "min_chance":   75,     # % chance of playing, if flagged at all
+    "due_pct":      0.15,   # top 15% of owed within position  -> DUE
+    "due_plus_pct": 0.05,   # top 5%                           -> DUE+
+    "min_owed":     2.0,    # and at least this many points owed
+    "goal_pts":     {"GKP": 10, "DEF": 6, "MID": 5, "FWD": 4},
+    "assist_pts":   3,
+    "conceded_pts": 0.5,    # -1 per 2 goals conceded (GKP/DEF)
+}
+
+def _assign_tiers(out, pools):
+    """Percentile tiers within position. pools: {pos: [(owed, key), ...]}."""
+    cfg = FLAG_CFG
+    for pos, pool in pools.items():
+        n = len(pool)
+        if n < 8:
+            continue
+        pool.sort(key=lambda x: x[0])     # ascending: most negative (HOT) first
+        k_due = max(1, int(round(n * cfg["due_pct"])))
+        k_dup = max(1, int(round(n * cfg["due_plus_pct"])))
+        for rank, (owed, key) in enumerate(pool):
+            from_top = n - 1 - rank       # 0 = most owed
+            if owed >= cfg["min_owed"]:
+                if from_top < k_dup:
+                    out[key]["tier"] = "DUE+"
+                elif from_top < k_due:
+                    out[key]["tier"] = "DUE"
+            elif owed <= -cfg["min_owed"]:
+                if rank < k_dup:
+                    out[key]["tier"] = "HOT+"
+                elif rank < k_due:
+                    out[key]["tier"] = "HOT"
+            out[key]["owed_rank"] = n - rank   # 1 = most owed
+            out[key]["pool_n"] = n
+
+def build_flags(players_raw):
+    """
+    Returns {player_id: flag_dict}. flag_dict always carries the raw real
+    numbers; `tier` is None / "DUE" / "DUE+" / "HOT" / "HOT+".
+    """
+    cfg = FLAG_CFG
+    out, pools = {}, {"GKP": [], "DEF": [], "MID": [], "FWD": []}
+
+    def f(p, k):
+        try:
+            return float(p.get(k) or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    for pid, p in players_raw.items():
+        pos   = POS_MAP[p["element_type"]]
+        goals, assists = int(p.get("goals_scored") or 0), int(p.get("assists") or 0)
+        xg, xa = f(p, "expected_goals"), f(p, "expected_assists")
+        gc, xgc = int(p.get("goals_conceded") or 0), f(p, "expected_goals_conceded")
+        mins, starts = int(p.get("minutes") or 0), int(p.get("starts") or 0)
+
+        owed_att = 0.0
+        if pos != "GKP":
+            owed_att = (xg - goals) * cfg["goal_pts"][pos] + (xa - assists) * cfg["assist_pts"]
+        owed_def = (gc - xgc) * cfg["conceded_pts"] if pos in ("GKP", "DEF") else 0.0
+        owed = owed_att + owed_def
+
+        chance = p.get("chance_of_playing_next_round")
+        fit = (p.get("status", "a") == "a") or (chance is not None and chance >= cfg["min_chance"])
+        eligible = mins >= cfg["min_minutes"] and starts >= cfg["min_starts"] and fit
+        out[pid] = {
+            "pos": pos, "xg": round(xg, 2), "xa": round(xa, 2),
+            "xgi": round(xg + xa, 2), "goals": goals, "assists": assists,
+            "gi": goals + assists, "gc": gc, "xgc": round(xgc, 2),
+            "owed_att": round(owed_att, 1), "owed_def": round(owed_def, 1),
+            "owed": round(owed, 1), "eligible": eligible, "tier": None,
+            "minutes": mins,
+        }
+        if eligible:
+            pools[pos].append((owed, pid))
+
+    _assign_tiers(out, pools)
+    return out
+
 def build_real_stats(players_raw):
     """
     Returns {player_id: {"columns": [{"title": str, "rows": [{"label","value","cls"}]}]}}
@@ -1223,7 +1311,7 @@ def serialize_player(p):
         "price_rising","price_falling","net_transfers","price_change",
         "ownership","differential_score","opp_adj","form_trend","form_trend_label",
         "rotation_risk","rotation_risk_label","fixes",
-        "real_stats",
+        "real_stats","flag",
     ]}
     # Add 4-GW projections — used for DGW sort and planner
     if "projections" not in p:
@@ -1344,6 +1432,7 @@ def api_load():
     bgw_set    = get_bgw_set(fix_map, current_gw)
     team_stats     = build_team_stats(players_raw)
     real_stats_by_id = build_real_stats(players_raw)
+    flags_by_id      = build_flags(players_raw)
 
     # Fetch user history first — we need it to identify any Free Hit GWs
     # before deciding which picks GW to load from
@@ -1409,8 +1498,10 @@ def api_load():
         # every player the frontend can open a profile for
         for _p in my_squad:
             _p["real_stats"] = real_stats_by_id.get(_p["id"], {}).get("columns", [])
+            _p["flag"] = flags_by_id.get(_p["id"])
         for _p in all_players:
             _p["real_stats"] = real_stats_by_id.get(_p["id"], {}).get("columns", [])
+            _p["flag"] = flags_by_id.get(_p["id"])
     except Exception as e:
         import traceback
         return jsonify({"error": f"Failed to process squad data: {e}",
@@ -1458,6 +1549,24 @@ def api_load():
                           for tid, gws in dgw_map.items() if gw in gws])
         for gw in range(current_gw, current_gw + 5)
     }
+
+    # Flagged players with zero recent form are filtered out of all_players
+    # (they're exactly the "due" ones) — add them so the Scout report and
+    # profiles can open them. Done after transfer logic so suggestions are
+    # unaffected.
+    try:
+        _have = {_p["id"] for _p in all_players}
+        for _pid, _fl in flags_by_id.items():
+            if _fl["tier"] and _pid not in _have:
+                _raw = players_raw[_pid]
+                if _raw.get("status") == "u":
+                    continue
+                _e = enrich(_raw, teams, fix_map, dgw_map, team_stats)
+                _e["real_stats"] = real_stats_by_id.get(_pid, {}).get("columns", [])
+                _e["flag"] = _fl
+                all_players.append(_e)
+    except Exception:
+        pass
 
     # Compute 4-GW projections for all players (used for DGW sort, planner)
     for _p in all_players:
@@ -1671,6 +1780,158 @@ def panel_init():
             "detail":  traceback.format_exc(),
         }), 500
 
+
+# ---------------------------------------------------------------------------
+# Rolling trends (last 5 GWs vs season) — from element-summary history
+# ---------------------------------------------------------------------------
+from concurrent.futures import ThreadPoolExecutor
+
+def _hist_rows(pid):
+    return fpl_get(f"/element-summary/{pid}/").get("history", []) or []
+
+def _trend_for(pid):
+    rows = _hist_rows(pid)
+    played = [r for r in rows if (r.get("minutes") or 0) > 0]
+    if len(rows) < 3:
+        return None
+    last = rows[-5:]
+    def fl(r, k):
+        try:
+            return float(r.get(k) or 0)
+        except (TypeError, ValueError):
+            return 0.0
+    s_min = sum(r.get("minutes") or 0 for r in rows)
+    l_min = sum(r.get("minutes") or 0 for r in last)
+    s_xgi = sum(fl(r, "expected_goal_involvements") for r in rows)
+    l_xgi = sum(fl(r, "expected_goal_involvements") for r in last)
+    s_xgi90 = (s_xgi / s_min * 90) if s_min >= 180 else None
+    l_xgi90 = (l_xgi / l_min * 90) if l_min >= 90 else None
+    s_avg_min = s_min / len(rows)
+    l_avg_min = l_min / len(last)
+    mins_drop = len(rows) >= 6 and s_avg_min >= 55 and l_avg_min <= s_avg_min * 0.75
+    xgi_dir = None
+    if s_xgi90 is not None and l_xgi90 is not None and len(played) >= 5:
+        if l_xgi90 >= s_xgi90 * 1.3 and l_xgi90 - s_xgi90 >= 0.15:
+            xgi_dir = "up"
+        elif l_xgi90 <= s_xgi90 * 0.7 and s_xgi90 - l_xgi90 >= 0.15:
+            xgi_dir = "down"
+    return {
+        "n": len(rows),
+        "l5_mins": [r.get("minutes") or 0 for r in last],
+        "l5_pts":  [r.get("total_points") or 0 for r in last],
+        "pts8":    [r.get("total_points") or 0 for r in rows[-8:]],
+        "l5_xgi90": round(l_xgi90, 2) if l_xgi90 is not None else None,
+        "season_xgi90": round(s_xgi90, 2) if s_xgi90 is not None else None,
+        "l5_avg_min": round(l_avg_min), "season_avg_min": round(s_avg_min),
+        "mins_drop": mins_drop, "xgi_dir": xgi_dir,
+    }
+
+@app.route("/api/trends", methods=["POST"])
+def api_trends():
+    ids = [int(i) for i in (request.json or {}).get("ids", [])][:90]
+    out = {}
+    def work(pid):
+        try:
+            return pid, _trend_for(pid)
+        except Exception:
+            return pid, None
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        for pid, t in ex.map(work, ids):
+            if t:
+                out[str(pid)] = t
+    return jsonify({"trends": out})
+
+# ---------------------------------------------------------------------------
+# Flag scoreboard — replays past gameweeks: what did DUE/HOT flags do next?
+# ---------------------------------------------------------------------------
+_scoreboard = {"state": "idle", "done": 0, "total": 0, "result": None, "error": None, "started": 0}
+
+def _run_scoreboard():
+    global _scoreboard
+    try:
+        boot = fpl_get("/bootstrap-static/")
+        cur = next((e["id"] for e in boot["events"] if e.get("is_current")), None) \
+              or max([e["id"] for e in boot["events"] if e.get("finished")] or [0])
+        elems = [p for p in boot["elements"] if (p.get("minutes") or 0) >= FLAG_CFG["min_minutes"]]
+        _scoreboard.update(total=len(elems), done=0)
+        hist = {}
+        def work(p):
+            try:
+                hist[p["id"]] = _hist_rows(p["id"])
+            except Exception:
+                hist[p["id"]] = []
+            _scoreboard["done"] += 1
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            list(ex.map(work, elems))
+        cfg = FLAG_CFG
+        pos_of = {p["id"]: POS_MAP[p["element_type"]] for p in elems}
+        buckets = {}   # tier -> list of (pts_per_gw_after, baseline)
+        by_gw = {}
+        for g in range(5, cur):        # need at least one GW afterwards
+            out, pools, fut = {}, {"GKP": [], "DEF": [], "MID": [], "FWD": []}, {}
+            for pid, rows in hist.items():
+                upto = [r for r in rows if (r.get("round") or 0) <= g]
+                nxt  = [r for r in rows if g < (r.get("round") or 0) <= g + 3]
+                if not nxt:
+                    continue
+                mins = sum(r.get("minutes") or 0 for r in upto)
+                starts = sum(r.get("starts") or 0 for r in upto)
+                if mins < cfg["min_minutes"] or starts < cfg["min_starts"]:
+                    continue
+                def sm(k):
+                    t = 0.0
+                    for r in upto:
+                        try: t += float(r.get(k) or 0)
+                        except (TypeError, ValueError): pass
+                    return t
+                pos = pos_of[pid]
+                owed = 0.0
+                if pos != "GKP":
+                    owed += (sm("expected_goals") - sm("goals_scored")) * cfg["goal_pts"][pos] \
+                          + (sm("expected_assists") - sm("assists")) * cfg["assist_pts"]
+                if pos in ("GKP", "DEF"):
+                    owed += (sm("goals_conceded") - sm("expected_goals_conceded")) * cfg["conceded_pts"]
+                out[pid] = {"tier": None, "pos": pos}
+                fut[pid] = sum(r.get("total_points") or 0 for r in nxt) / max(1, len(nxt))
+                pools[pos].append((owed, pid))
+            _assign_tiers(out, pools)
+            base = {}
+            for pos in pools:
+                vals = [fut[k] for _, k in pools[pos]]
+                base[pos] = sum(vals) / len(vals) if vals else 0
+            for pid, o in out.items():
+                if o["tier"]:
+                    buckets.setdefault(o["tier"], []).append((fut[pid], base[o["pos"]], g, pid, o["pos"]))
+        res = {}
+        for tier, lst in buckets.items():
+            n = len(lst)
+            res[tier] = {
+                "n": n,
+                "avg_after": round(sum(x[0] for x in lst) / n, 2),
+                "avg_baseline": round(sum(x[1] for x in lst) / n, 2),
+                "pct_beat": round(100 * sum(1 for x in lst if x[0] > x[1]) / n),
+            }
+            by_pos = {}
+            for x in lst:
+                by_pos.setdefault(x[4], []).append(x)
+            res[tier]["by_pos"] = {
+                pos: {"n": len(v), "avg_after": round(sum(i[0] for i in v)/len(v), 2),
+                      "avg_baseline": round(sum(i[1] for i in v)/len(v), 2)}
+                for pos, v in by_pos.items()
+            }
+        _scoreboard.update(state="done", result={"tiers": res, "gws": [5, cur - 1], "window": 3,
+                                                  "players": len(elems)})
+    except Exception as e:
+        _scoreboard.update(state="error", error=str(e))
+
+@app.route("/api/flag_scoreboard")
+def flag_scoreboard():
+    if request.args.get("start") and _scoreboard["state"] != "running":
+        if not (_scoreboard["state"] == "done" and time.time() - _scoreboard["started"] < 3600):
+            _scoreboard.update(state="running", done=0, total=0, result=None, error=None,
+                               started=time.time())
+            threading.Thread(target=_run_scoreboard, daemon=True).start()
+    return jsonify({k: _scoreboard[k] for k in ("state", "done", "total", "result", "error")})
 
 @app.route("/api/player_history/<int:player_id>")
 def player_history(player_id):
