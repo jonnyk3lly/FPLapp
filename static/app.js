@@ -627,7 +627,7 @@ document.addEventListener("mouseover", e => {
   if (!pid) return;
   const allP = (_state.squad || []).concat(_state.all_players || []);
   const p = allP.find(x => x.id === pid || String(x.id) === String(pid));
-  if (p) showPlayerHover(p, card);
+  // Old stat panel retired — the rich hover card (hcard) replaces it.
 }, false);
 
 document.addEventListener("mouseout", e => {
@@ -908,23 +908,20 @@ function renderMyTeam(squad, dgwSummary, allPlayers, meta) {
   _my.sim = {};
 
   el("tab-myteam").innerHTML = `
-    ${formBanner}
-    <div class="myteam-layout">
-      <div class="myteam-left">
+    <div class="mt-grid">
+      <div class="mt-left">
+        ${formBanner}
         <div id="lensHost"></div>
         <div id="simHost"></div>
         <div id="pitchHost"></div>
         ${benchBanner}
       </div>
-      <div class="myteam-right">
-        <div class="team-side-panel">
-          <div class="tsp-card" id="inboxHost"></div>
-          <div class="tsp-card" id="sqStatsHost"></div>
-        </div>
+      <div class="mt-right">
+        <div class="sc-panel mt-inbox" id="inboxHost"></div>
+        <div id="scoutHost" style="display:contents"></div>
+        <div class="sc-panel mt-stats" id="sqStatsHost"></div>
       </div>
-    </div>
-    <div class="sc-head">Scout report</div>
-    <div class="sc-grid" id="scoutHost"></div>`;
+    </div>`;
   refreshMyTeamDynamic();
   refreshInbox();
   refreshScout();
@@ -5091,7 +5088,7 @@ function flagTag(p) {
   if (!t) return "";
   const cls = t.startsWith("DUE") ? "ftag-due" : "ftag-hot";
   const strong = t.endsWith("+") ? " ftag-strong" : "";
-  return `<span class="ftag ${cls}${strong}" title="${flagTip(p).replace(/"/g, "&quot;")}">${t}</span>`;
+  return `<span class="ftag ${cls}${strong}">${t}</span>`;
 }
 
 // ── Pitch lenses ─────────────────────────────────────────────────────
@@ -5144,29 +5141,28 @@ function lensBlock(p, lens) {
   return `<div class="pform">${p.form}${trendEl}</div><div class="pform-lbl">form</div>`;
 }
 
-function playerCard(p, dim = false) {
-  const fix1  = p.fixes?.[0];
-  const fdrC  = fix1 ? FDR_C[fix1.fdr] || "#888" : "#888";
-  const nFix  = fix1 ? `${fix1.opp} (${fix1.home ? "H" : "A"})` : "TBC";
-  const cap   = p.multiplier === 2 ? `<div class="cap-dot">C</div>` : p.multiplier === 3 ? `<div class="cap-dot tc">TC</div>` : "";
-  const inj   = p.news ? `<div class="inj-dot" title="${(p.news || "").replace(/"/g, "&quot;")}">⚠️</div>` : "";
-  const pArr  = p.price_rising ? `<div class="price-badge">↑</div>` : p.price_falling ? `<div class="price-badge" style="color:var(--red-fg)">↓</div>` : "";
-  const rotEl = p.rotation_risk
-    ? `<div style="font-size:9px;color:var(--amber);margin-top:1px" title="${p.rotation_risk_label || ""}">🔄 rotation risk</div>` : "";
-  const tr = (typeof trendTag === "function") ? trendTag(p) : "";
+// Compact fixture line: coloured square per fixture, opponent code
+// (UPPER = home, lower = away). Real FPL FDR colours.
+function fixLine(fixes, n = 3) {
+  const fx = (fixes || []).slice(0, n);
+  if (!fx.length) return `<span class="fx-sq fx-none">no fixture</span>`;
+  return fx.map(f => `<span class="fx-sq" style="background:${FDR_C[f.fdr] || "#888"}">${f.home ? f.opp : (f.opp || "").toLowerCase()}</span>`).join("");
+}
 
-  return `<div class="pcard${dim ? " dim" : ""}${p._sim ? " sim-in" : ""}" data-pid="${p.id}" style="cursor:pointer">
+function playerCard(p, dim = false) {
+  const cap   = p.multiplier === 2 ? `<div class="cap-dot">C</div>` : p.multiplier === 3 ? `<div class="cap-dot tc">TC</div>` : "";
+  const inj   = p.news ? `<div class="inj-dot">⚠️</div>` : "";
+  const pArr  = p.price_rising ? `<div class="price-badge">↑</div>` : p.price_falling ? `<div class="price-badge" style="color:var(--red-fg)">↓</div>` : "";
+  const tr = (typeof trendTag === "function") ? trendTag(p) : "";
+  const rot = p.rotation_risk ? `<span class="ftag ftag-rot">ROT</span>` : "";
+  const av = p.availability < 1 && p.availability > 0 ? `<span class="ftag ftag-hot">${Math.round(p.availability * 100)}%</span>` : "";
+  return `<div class="pcard pc-h${dim ? " dim" : ""}${p._sim ? " sim-in" : ""}" data-pid="${p.id}" style="cursor:pointer">
     ${cap}${inj}${pArr}
-    <img src="${p.shirt}" onerror="this.style.display='none'" alt="">
-    <div class="pname">${p.name}</div>
-    <div class="pteam">${p.team_name} · £${p.price}m</div>
-    ${lensBlock(p, _my.lens)}
-    <div class="fdr-row">${fdrSq(p.fixes, 3)}</div>
-    <div style="font-size:9px;color:${fdrC};margin-top:2px">${nFix}</div>
-    ${dgwBadge(p)}
-    <div class="ftag-row">${flagTag(p)}${tr}</div>
-    ${p.availability < 1 && p.availability > 0 ? `<div style="font-size:9px;color:var(--amber);margin-top:1px">${Math.round(p.availability * 100)}% avail.</div>` : ""}
-    ${rotEl}
+    <div class="pc-top"><img src="${p.shirt}" onerror="this.style.display='none'" alt="">
+      <div class="pc-id"><div class="pname">${p.name}</div><div class="pteam">${p.team_name} · £${p.price}m</div></div></div>
+    <div class="pc-lens">${lensBlock(p, _my.lens)}</div>
+    <div class="pc-fx">${fixLine(p.fixes, 3)}</div>
+    <div class="ftag-row">${flagTag(p)}${tr}${dgwBadge(p) ? `<span class="ftag ftag-dgw">DGW</span>` : ""}${av}${rot}</div>
   </div>`;
 }
 
@@ -5239,19 +5235,22 @@ function simBannerHtml() {
 }
 
 // ── Pitch / dynamic region ───────────────────────────────────────────
+function pitchCol(players, label) {
+  return `<div class="pitch-col"><div class="pitch-row-label">${label}</div><div class="pitch-col-players">${players.map(p => playerCard(p)).join("")}</div></div>`;
+}
+
 function pitchHtml(squad) {
   const starters = squad.filter(p => !p.is_sub).sort((a, b) => a.pick_pos - b.pick_pos);
   const subs     = squad.filter(p => p.is_sub).sort((a, b) => a.pick_pos - b.pick_pos);
   const by = pos => starters.filter(p => p.pos === pos);
   const cur = `${by("DEF").length}-${by("MID").length}-${by("FWD").length}`;
-  return `<div style="text-align:center;margin-bottom:6px">
-      <span style="background:rgba(0,0,0,.6);color:#fff;font-size:10px;font-weight:700;padding:2px 10px;letter-spacing:.5px">${cur}</span>
+  return `<div class="pitch-h-wrap">
+    <div class="pitch h">
+      <span class="pitch-form">${cur}</span>
+      ${pitchCol(by("GKP"), "GK")}${pitchCol(by("DEF"), "DEF")}${pitchCol(by("MID"), "MID")}${pitchCol(by("FWD"), "FWD")}
     </div>
-    <div class="pitch">
-      ${pitchRow(by("FWD"), "FORWARDS")}${pitchRow(by("MID"), "MIDFIELDERS")}
-      ${pitchRow(by("DEF"), "DEFENDERS")}${pitchRow(by("GKP"), "GOALKEEPER")}
-    </div>
-    <div class="bench-strip"><div class="bench-strip-label">Bench</div>${subs.map(p => playerCard(p, true)).join("")}</div>`;
+    <div class="bench-col-h"><div class="bench-strip-label">Bench</div>${subs.map(p => playerCard(p, true)).join("")}</div>
+  </div>`;
 }
 
 function squadStatsHtml(squad) {
@@ -5303,14 +5302,17 @@ function goToTab(id) {
   }
 }
 
-// ── Scout report (3 × 2 grid) ────────────────────────────────────────
-function scPanel(title, bodyHtml, tabsHtml = "", cls = "") {
-  return `<div class="sc-panel ${cls}"><div class="tsp-title sc-title"><span>${title}</span>${tabsHtml}</div><div class="sc-body">${bodyHtml}</div></div>`;
+// ── Scout report (panels join the My Team grid) ─────────────────────
+_my.more = {};
+function scN(key) { return _my.more[key] ? 5 : 3; }
+function scPanel(key, title, bodyHtml, tabsHtml = "") {
+  const more = `<div class="sc-more" data-scmore="${key}">${_my.more[key] ? "less ▴" : "more ▾"}</div>`;
+  return `<div class="sc-panel"><div class="tsp-title sc-title"><span>${title}</span>${tabsHtml}</div><div class="sc-body">${bodyHtml}</div>${more}</div>`;
 }
 function scRow(p, right, sub, attrs) {
   const own = new Set((_state.squad || []).map(x => x.id)).has(p.id);
   return `<div class="sc-row${own ? " own" : ""}" ${attrs || `data-pid="${p.id}"`}>
-    <div class="sc-l"><div class="sc-name">${p.name}${own ? ' <span class="sc-own" title="In your squad">●</span>' : ""} ${flagTag(p)}</div>
+    <div class="sc-l"><div class="sc-name">${p.name}${own ? ' <span class="sc-own">●</span>' : ""} ${flagTag(p)}</div>
       <div class="sc-sub">${p.team_name} · ${p.pos} · £${p.price}m</div></div>
     <div class="sc-r"><div class="sc-main">${right}</div><div class="sc-sub">${sub}</div></div>
   </div>`;
@@ -5325,7 +5327,7 @@ function scoutDueHtml() {
   const t = _my.scout.due;
   const list = (_state.all_players || [])
     .filter(p => (flagTier(p) || "").startsWith("DUE") && (t === "ALL" || p.pos === t))
-    .sort((a, b) => b.flag.owed - a.flag.owed).slice(0, 5);
+    .sort((a, b) => b.flag.owed - a.flag.owed).slice(0, scN("due"));
   return list.length ? list.map(p => scRow(p, `${owedStr(p.flag)} pts`, flagLine(p))).join("") : SC_EMPTY;
 }
 function scoutHotHtml() {
@@ -5333,11 +5335,11 @@ function scoutHotHtml() {
   const own = new Set((_state.squad || []).map(x => x.id));
   const list = (_state.all_players || [])
     .filter(p => (flagTier(p) || "").startsWith("HOT") && (t === "ALL" || p.pos === t))
-    .sort((a, b) => (own.has(b.id) - own.has(a.id)) || (a.flag.owed - b.flag.owed)).slice(0, 5);
+    .sort((a, b) => (own.has(b.id) - own.has(a.id)) || (a.flag.owed - b.flag.owed)).slice(0, scN("hot"));
   return list.length ? list.map(p => scRow(p, `${owedStr(p.flag)} pts`, flagLine(p))).join("") : SC_EMPTY;
 }
 function scoutCaptainHtml() {
-  const list = (_my.cap || []).slice(0, 5);
+  const list = (_my.cap || []).slice(0, scN("cap"));
   if (!list.length) return SC_EMPTY;
   return list.map(p => {
     const f = p.fixes?.[0];
@@ -5347,18 +5349,18 @@ function scoutCaptainHtml() {
 function scoutSwingsHtml() {
   const opts = (_state.transfers || []).flatMap(g => g.options.map(o => ({ ...o, out: g.out })));
   opts.sort((a, b) => (b.proj_gain3 ?? b.gain) - (a.proj_gain3 ?? a.gain));
-  const top = opts.slice(0, 5);
+  const top = opts.slice(0, scN("swing"));
   if (!top.length) return `<div class="sc-empty">No transfer suggestions.</div>`;
   return top.map(o => `<div class="sc-row" data-sim="${o.out.id}:${o.in.id}" title="Click to simulate on the pitch">
     <div class="sc-l"><div class="sc-name"><span class="sc-out">${o.out.name}</span> → ${o.in.name}</div>
       <div class="sc-sub">${o.in.team_name} · £${o.in.price}m · form ${o.in.form}</div></div>
-    <div class="sc-r"><div class="sc-main">+${(o.proj_gain3 ?? 0).toFixed ? (o.proj_gain3 ?? 0).toFixed(1) : o.proj_gain3} pts</div><div class="sc-sub">proj. 3 GWs · ${o.uses_free ? "free" : "−" + (o.hit_cost || 4)}</div></div>
+    <div class="sc-r"><div class="sc-main">+${Number(o.proj_gain3 ?? 0).toFixed(1)} pts</div><div class="sc-sub">proj. 3 GWs · ${o.uses_free ? "free" : "−" + (o.hit_cost || 4)}</div></div>
   </div>`).join("");
 }
 function scoutDiffHtml() {
   const list = (_state.all_players || [])
     .filter(p => p.ownership < 10 && p.starts >= 5 && p.status === "a" && p.xgi90 > 0 && (p.chance == null || p.chance >= 75))
-    .sort((a, b) => b.xgi90 - a.xgi90).slice(0, 5);
+    .sort((a, b) => b.xgi90 - a.xgi90).slice(0, scN("diff"));
   if (!list.length) return SC_EMPTY;
   return list.map(p => scRow(p, `xGI/90 ${p.xgi90.toFixed(2)}`, `${p.ownership.toFixed(1)}% owned · form ${p.form}`)).join("");
 }
@@ -5371,13 +5373,14 @@ function scoutSwingHtml() {
     const a = avg(fx.slice(0, 3)), b = avg(fx.slice(3, 6));
     return { t, fx, a, b, d: a - b };
   }).filter(Boolean);
-  const imp = rows.slice().sort((x, y) => y.d - x.d).slice(0, 3);
-  const wor = rows.slice().sort((x, y) => x.d - y.d).slice(0, 2);
+  const big = !!_my.more.fxs;
+  const imp = rows.slice().sort((x, y) => y.d - x.d).slice(0, big ? 3 : 2);
+  const wor = rows.slice().sort((x, y) => x.d - y.d).slice(0, big ? 2 : 1);
   const line = (r, tag) => {
     const yours = mine.filter(p => p.team_name === r.t.team).map(p => p.name);
     return `<div class="sc-row" style="cursor:default"><div class="sc-l"><div class="sc-name">${r.t.team} <span class="ftag ${tag === "buy" ? "ftag-due" : "ftag-hot"}">${tag === "buy" ? "IMPROVING" : "WORSENING"}</span></div>
       <div class="sc-sub">${yours.length ? "Yours: " + yours.join(", ") : "None of yours"}</div></div>
-      <div class="sc-r"><div class="fdr-row" style="justify-content:flex-end">${fdrSq(r.fx, 6)}</div>
+      <div class="sc-r"><div class="fx-line">${fixLine(r.fx, 6)}</div>
       <div class="sc-sub">FDR avg ${r.a.toFixed(1)} → ${r.b.toFixed(1)}</div></div></div>`;
   };
   if (!rows.length) return SC_EMPTY;
@@ -5386,12 +5389,12 @@ function scoutSwingHtml() {
 
 function scoutGridHtml() {
   return [
-    scPanel("Due a return", scoutDueHtml(), scTabs("due")),
-    scPanel("Running hot", scoutHotHtml(), scTabs("hot")),
-    scPanel("Captain options", scoutCaptainHtml()),
-    scPanel("Best swings", scoutSwingsHtml()),
-    scPanel("Differentials · under 10%", scoutDiffHtml()),
-    scPanel("Fixture swing · next 3 → following 3", scoutSwingHtml()),
+    scPanel("due", "Due a return", scoutDueHtml(), scTabs("due")),
+    scPanel("hot", "Running hot", scoutHotHtml(), scTabs("hot")),
+    scPanel("cap", "Captain options", scoutCaptainHtml()),
+    scPanel("swing", "Best swings", scoutSwingsHtml()),
+    scPanel("diff", "Differentials · under 10%", scoutDiffHtml()),
+    scPanel("fxs", "Fixture swing · next 3 → following 3", scoutSwingHtml()),
   ].join("");
 }
 function refreshScout() { if (el("scoutHost")) el("scoutHost").innerHTML = scoutGridHtml(); }
@@ -5474,6 +5477,8 @@ function refreshInbox() { if (el("inboxHost")) el("inboxHost").innerHTML = inbox
 document.addEventListener("click", function (e) {
   const lens = e.target.closest("[data-lens]");
   if (lens) { _my.lens = lens.dataset.lens; refreshMyTeamDynamic(); return; }
+  const mo = e.target.closest("[data-scmore]");
+  if (mo) { const k = mo.dataset.scmore; _my.more[k] = !_my.more[k]; refreshScout(); return; }
   const sct = e.target.closest("[data-sctab]");
   if (sct) { const [k, t] = sct.dataset.sctab.split(":"); _my.scout[k] = t; refreshScout(); return; }
   const sim = e.target.closest("[data-sim]");
@@ -5518,9 +5523,9 @@ function trendOf(p) { return _trends[String(p.id)] || null; }
 function trendTag(p) {
   const t = trendOf(p);
   if (!t) return "";
-  if (t.mins_drop) return `<span class="ftag ftag-hot" title="Last 5 GWs: avg ${t.l5_avg_min} mins vs ${t.season_avg_min} season">MINS ↓</span>`;
-  if (t.xgi_dir === "up") return `<span class="ftag ftag-due" title="xGI/90 last 5: ${t.l5_xgi90} vs season ${t.season_xgi90}">TREND ↑</span>`;
-  if (t.xgi_dir === "down") return `<span class="ftag ftag-hot" title="xGI/90 last 5: ${t.l5_xgi90} vs season ${t.season_xgi90}">TREND ↓</span>`;
+  if (t.mins_drop) return `<span class="ftag ftag-hot">MINS ↓</span>`;
+  if (t.xgi_dir === "up") return `<span class="ftag ftag-due">TREND ↑</span>`;
+  if (t.xgi_dir === "down") return `<span class="ftag ftag-hot">TREND ↓</span>`;
   return "";
 }
 
@@ -5623,3 +5628,109 @@ function scoreboardHtml(r) {
   return `<table class="data-table"><thead><tr><th>Flag</th><th>Flags raised</th><th>Avg pts/GW after</th><th>Position avg</th><th>Difference</th><th>Beat avg</th></tr></thead><tbody>${rows || `<tr><td colspan="6">No flags raised in the window.</td></tr>`}</tbody></table>
     <div style="font-size:10px;color:var(--text3);margin-top:6px">GW${r.gws[0]}–GW${r.gws[1]} · next ${r.window} GWs · ${r.players} players. DUE is "working" if difference is positive; HOT if negative.</div>`;
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// Hover card — replaces plain-text tooltips. Real API data; the points-owed
+// figure is a labelled calculation.
+// ═══════════════════════════════════════════════════════════════════════
+let _hcTimer = null, _hcPid = null;
+
+function rsVal(p, label) {
+  for (const c of (p.real_stats || [])) for (const r of c.rows) if (r.label === label) return r.value;
+  return null;
+}
+
+function hcFixtures(p) {
+  const fx = p.fixes || [];
+  if (!fx.length) return `<div class="hc-dim">No fixtures listed</div>`;
+  const first = fx[0].gw, cells = [];
+  for (let g = first; g < first + 6 && g <= 38; g++) {
+    const here = fx.filter(f => f.gw === g);
+    cells.push(`<div class="hc-fx"><div class="hc-gw">GW${g}</div>${
+      here.length ? here.map(f => `<div class="fx-sq" style="background:${FDR_C[f.fdr] || "#888"}">${f.home ? f.opp : (f.opp || "").toLowerCase()}</div>`).join("")
+                  : `<div class="fx-sq fx-none">—</div>`}</div>`);
+  }
+  return `<div class="hc-fxrow">${cells.join("")}</div>`;
+}
+
+function hoverCardHtml(p) {
+  const f = p.flag, t = trendOf(p), gk = p.pos === "GKP";
+  const status = p.news
+    ? `<div class="hc-status">⚠ ${p.news}${p.chance != null ? ` · ${p.chance}% chance` : ""}</div>` : "";
+  let flagBlock = "";
+  if (f && f.eligible) {
+    const detail = gk ? `GC ${f.gc} vs xGC ${f.xgc.toFixed(1)}`
+      : `xG ${f.xg.toFixed(1)} / ${f.goals} goal${f.goals === 1 ? "" : "s"} · xA ${f.xa.toFixed(1)} / ${f.assists} assist${f.assists === 1 ? "" : "s"}`
+        + (p.pos === "DEF" ? ` · GC ${f.gc} vs xGC ${f.xgc.toFixed(1)}` : "");
+    flagBlock = `<div class="hc-sec"><div class="hc-h">Points owed ${flagTag(p)} <span class="hc-r">${owedStr(f)} pts</span></div>
+      <div class="hc-line">${detail}</div>
+      <div class="hc-dim">Rank ${f.owed_rank} of ${f.pool_n} ${p.pos} · ${f.minutes} mins · calculation, not a prediction</div></div>`;
+  } else if (f) {
+    flagBlock = `<div class="hc-sec"><div class="hc-h">Points owed <span class="hc-r hc-dim">not eligible</span></div>
+      <div class="hc-dim">Needs 450+ mins, 5+ starts and fitness · ${f.minutes} mins so far</div></div>`;
+  }
+  let trendBlock = "";
+  if (t) {
+    const bars = (t.l5_mins || []).map(m => `<span class="hc-bar" style="height:${Math.max(2, Math.round(m / 90 * 22))}px" title="${m}'"></span>`).join("");
+    trendBlock = `<div class="hc-sec"><div class="hc-h">Last 5 GWs ${trendTag(p)}</div>
+      <div class="hc-trend"><div><div class="hc-bars">${bars}</div><div class="hc-dim">minutes</div></div>
+      <div>${sparkline(t.l5_pts || t.pts8, 70, 24)}<div class="hc-dim">points: ${(t.l5_pts || []).join(" · ")}</div></div>
+      <div class="hc-line">xGI/90 ${t.l5_xgi90 ?? "—"}<div class="hc-dim">season ${t.season_xgi90 ?? "—"}</div></div></div></div>`;
+  } else if (_trendsLoading) {
+    trendBlock = `<div class="hc-sec hc-dim">Loading last-5 trends…</div>`;
+  }
+  const kv = (k, v) => v == null ? "" : `<span><b>${v}</b> ${k}</span>`;
+  const season = gk
+    ? kv("mins", p.minutes) + kv("starts", p.starts) + kv("saves", rsVal(p, "Saves")) + kv("CS", rsVal(p, "Clean sheets")) + kv("xGC/90", p.xgc90 != null ? p.xgc90.toFixed(2) : null) + kv("pts", p.total_pts)
+    : kv("mins", p.minutes) + kv("starts", p.starts) + kv("mins/start", Math.round(p.mins_per_start || 0)) + kv("goals", rsVal(p, "Goals")) + kv("assists", rsVal(p, "Assists")) + kv("bonus", rsVal(p, "Bonus")) + kv("xGI/90", p.xgi90 ? p.xgi90.toFixed(2) : null) + kv("pts", p.total_pts);
+  return `<div class="hc-head"><img src="${p.shirt}" onerror="this.style.display='none'" alt="">
+      <div><div class="hc-name">${p.name}</div><div class="hc-dim">${p.team_name} · ${p.pos} · £${p.price}m · form ${p.form} · ${Number(p.ownership || 0).toFixed(1)}% owned</div></div></div>
+    ${status}${flagBlock}
+    <div class="hc-sec"><div class="hc-h">Next 6 fixtures</div>${hcFixtures(p)}</div>
+    ${trendBlock}
+    <div class="hc-sec hc-season">${season}</div>
+    <div class="hc-foot">Click for full profile</div>`;
+}
+
+function hcHide() {
+  clearTimeout(_hcTimer); _hcPid = null;
+  const c = el("hcard"); if (c) c.style.display = "none";
+}
+
+function hcPlace(c, x, y) {
+  const pad = 14, w = c.offsetWidth, h = c.offsetHeight;
+  let left = x + pad, top = y + pad;
+  if (left + w > innerWidth - 8) left = Math.max(8, x - w - pad);
+  if (top + h > innerHeight - 8) top = Math.max(8, innerHeight - h - 8);
+  c.style.left = left + "px"; c.style.top = top + "px";
+}
+
+document.addEventListener("mouseover", function (e) {
+  if (!window.matchMedia("(hover: hover)").matches || !_state) return;
+  const t = e.target.closest("[data-pid]");
+  if (!t || t.closest("#profileModal")) { if (!t) hcHide(); return; }
+  const pid = parseInt(t.dataset.pid);
+  if (!pid || pid === _hcPid) return;
+  hcHide(); _hcPid = pid;
+  const x = e.clientX, y = e.clientY;
+  _hcTimer = setTimeout(() => {
+    const p = (_state.all_players || []).find(q => q.id === pid) || (_state.squad || []).find(q => q.id === pid);
+    if (!p) return;
+    let c = el("hcard");
+    if (!c) { c = document.createElement("div"); c.id = "hcard"; document.body.appendChild(c); }
+    c.innerHTML = hoverCardHtml(p);
+    c.style.display = "block";
+    hcPlace(c, x, y);
+  }, 250);
+}, true);
+
+document.addEventListener("mouseout", function (e) {
+  const t = e.target.closest && e.target.closest("[data-pid]");
+  if (t && !t.contains(e.relatedTarget)) hcHide();
+}, true);
+document.addEventListener("mousemove", function (e) {
+  const c = el("hcard");
+  if (c && c.style.display === "block") hcPlace(c, e.clientX, e.clientY);
+}, true);
+document.addEventListener("click", hcHide, true);
+window.addEventListener("scroll", hcHide, true);
